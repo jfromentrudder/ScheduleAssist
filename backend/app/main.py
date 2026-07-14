@@ -1,23 +1,13 @@
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app import models  # noqa: F401  (ensures models are registered with Base)
 from app.config import settings
-from app.database import Base, engine, get_db
+from app.database import get_db
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Dev convenience: create tables on startup. Switch to Alembic migrations later.
-    Base.metadata.create_all(bind=engine)
-    yield
-
-
-app = FastAPI(title="ScheduleAssist API", lifespan=lifespan)
+# Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
+app = FastAPI(title="ScheduleAssist API")
 
 app.add_middleware(
     CORSMiddleware,

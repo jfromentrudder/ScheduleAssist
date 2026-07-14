@@ -73,6 +73,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head   # apply database migrations
 uvicorn app.main:app --reload
 ```
 
@@ -94,7 +95,16 @@ App at http://localhost:5173. Requests to `/api/*` are proxied to the backend
 Backend settings come from environment variables or `backend/.env`
 (see `backend/.env.example`). Defaults match the docker-compose database.
 
-## Notes
+## Database migrations
 
-- Tables are auto-created from `app/models.py` on startup (dev convenience).
-  Switch to Alembic migrations once the schema stabilizes.
+The schema is managed with [Alembic](https://alembic.sqlalchemy.org/)
+(`backend/alembic/`). Common commands (from `backend/`, venv active):
+
+```sh
+alembic upgrade head                          # apply pending migrations
+alembic revision --autogenerate -m "message"  # generate a migration after model changes
+alembic downgrade -1                          # roll back one migration
+```
+
+After changing `app/models.py`, generate a migration, review the generated
+file in `alembic/versions/`, then apply it.
