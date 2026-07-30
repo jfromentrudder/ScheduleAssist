@@ -28,6 +28,7 @@ def main(email: str) -> int:
     if user is None:
         existing = db.scalars(select(User.email)).all()
         print(f"No user {email!r}. Known users: {existing or '(none)'}")
+        db.close()
         return 1
 
     # Clear anything a previous run left behind.
