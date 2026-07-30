@@ -1,3 +1,3 @@
 from app.models import Base
 
-target.metadata = Base.metadata
+target_metadata = Base.metadata
