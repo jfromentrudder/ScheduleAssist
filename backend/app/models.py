@@ -2,11 +2,42 @@
 SQLAlchemy ORM models.
 """
 
+import enum
+
 from app.crypto import EncryptedString
 from app.database import Base  # noqa: F401
-from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func, JSON
+from datetime import datetime, time
+from sqlalchemy import (
+    CheckConstraint, Column, DateTime, Enum, ForeignKey, Index, String, Table,
+    Text, Time, UniqueConstraint, func, text, JSON,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+
+class EventType(str, enum.Enum):
+    """What kind of thing an event is, from the scheduler's point of view."""
+
+    # A due date. The engine allocates prep periods *before* it.
+    DEADLINE = "deadline"
+    # A fixed block of busy time (class, meeting). The engine schedules *around* it.
+    ONE_TIME = "one_time"
+
+
+class EventSource(str, enum.Enum):
+    IMPORTED = "imported"  # pulled from a connected calendar
+    MANUAL = "manual"      # created in ScheduleAssist
+
+
+# Stored as VARCHAR + CHECK rather than a native Postgres ENUM, so adding a
+# value later is an ordinary migration instead of an ALTER TYPE dance.
+# create_constraint must be set explicitly: SQLAlchemy defaults it to False,
+# which would leave the column a bare VARCHAR accepting any short string.
+_EVENT_TYPE = Enum(EventType, name="event_type", native_enum=False,
+                   create_constraint=True,
+                   values_callable=lambda e: [m.value for m in e])
+_EVENT_SOURCE = Enum(EventSource, name="event_source", native_enum=False,
+                     create_constraint=True,
+                     values_callable=lambda e: [m.value for m in e])
 
 
 class User(Base):
@@ -26,10 +57,28 @@ class User(Base):
     # signed in with any provider can still connect a Google calendar.
     calendar_connections: Mapped[list["CalendarConnection"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    events: Mapped[list["Event"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    periods: Mapped[list["Period"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
-    workday_preferences: Mapped[dict] = mapped_column(
-        # Default workday preferences
-        JSON, default=lambda: {"monday": "9:00-17:00", "tuesday": "9:00-17:00", "wednesday": "9:00-17:00", "thursday": "9:00-17:00", "friday": "9:00-17:00"})
+    # --- Scheduling preferences. The generator reads these directly. ---
+    # Days the user is willing to work, as ISO weekday numbers (Monday = 0).
+    workdays: Mapped[list[int]] = mapped_column(
+        JSON, default=lambda: [0, 1, 2, 3, 4],
+        server_default=text("'[0, 1, 2, 3, 4]'"))
+    # Earliest and latest wall-clock times a period may occupy, same every workday.
+    day_start: Mapped[time] = mapped_column(
+        Time, default=time(9, 0), server_default=text("'09:00'"))
+    day_end: Mapped[time] = mapped_column(
+        Time, default=time(17, 0), server_default=text("'17:00'"))
+    # Length of one generated work period.
+    period_minutes: Mapped[int] = mapped_column(
+        default=50, server_default=text("50"))
+    # The wall-clock times above are meaningless without a zone: 09:00 is a
+    # different instant in Corvallis than in UTC. Everything else is stored UTC.
+    timezone: Mapped[str] = mapped_column(
+        String(64), default="UTC", server_default="UTC")
 
 
 class AuthIdentity(Base):
@@ -108,3 +157,104 @@ class CalendarConnection(Base):
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes.split()
+
+
+# A period can serve several events (one study block covering two deadlines),
+# and an event's prep can span several periods — hence many-to-many.
+period_events = Table(
+    "period_events",
+    Base.metadata,
+    Column("period_id", ForeignKey("periods.id", ondelete="CASCADE"),
+           primary_key=True),
+    Column("event_id", ForeignKey("events.id", ondelete="CASCADE"),
+           primary_key=True),
+)
+
+
+class Event(Base):
+    """Something on the user's schedule: a deadline to work toward, or a fixed
+    block of busy time to schedule around."""
+
+    __tablename__ = "events"
+    __table_args__ = (
+        # A one-time event occupies a span; a deadline is a single moment.
+        # Enforced in the database so the generator can trust the shape.
+        CheckConstraint(
+            "(event_type = 'one_time'"
+            "  AND starts_at IS NOT NULL AND ends_at IS NOT NULL AND due_at IS NULL)"
+            " OR (event_type = 'deadline'"
+            "  AND due_at IS NOT NULL AND starts_at IS NULL AND ends_at IS NULL)",
+            name="ck_events_times_match_type",
+        ),
+        CheckConstraint("ends_at IS NULL OR ends_at > starts_at",
+                        name="ck_events_end_after_start"),
+        CheckConstraint(
+            "expected_prep_minutes IS NULL OR expected_prep_minutes > 0",
+            name="ck_events_prep_positive"),
+        # De-duplicates re-imports. Manual events leave both columns NULL, and
+        # Postgres treats NULLs as distinct, so they are unaffected.
+        UniqueConstraint("calendar_connection_id", "provider_event_id",
+                         name="uq_events_provider_event"),
+        # The schedule view and generator both query a user's date range.
+        Index("ix_events_user_starts_at", "user_id", "starts_at"),
+        Index("ix_events_user_due_at", "user_id", "due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[EventType] = mapped_column(_EVENT_TYPE)
+    source: Mapped[EventSource] = mapped_column(_EVENT_SOURCE)
+
+    # Populated per event_type; see the CHECK constraint above.
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_all_day: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false"))
+
+    # How much work the user expects this to take. Drives how many periods the
+    # generator allocates; NULL means "no prep needed" (e.g. a plain meeting).
+    expected_prep_minutes: Mapped[int | None] = mapped_column()
+
+    # Set only for imported events. CASCADE means disconnecting a calendar
+    # removes the events it brought in.
+    calendar_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("calendar_connections.id", ondelete="CASCADE"), index=True)
+    provider_event_id: Mapped[str | None] = mapped_column(String(255))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="events")
+    periods: Mapped[list["Period"]] = relationship(
+        secondary=period_events, back_populates="events")
+
+
+class Period(Base):
+    """A generated work block. Derived data: regeneration replaces these."""
+
+    __tablename__ = "periods"
+    __table_args__ = (
+        CheckConstraint("ends_at > starts_at", name="ck_periods_end_after_start"),
+        Index("ix_periods_user_starts_at", "user_id", "starts_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="periods")
+    events: Mapped[list[Event]] = relationship(
+        secondary=period_events, back_populates="periods")
