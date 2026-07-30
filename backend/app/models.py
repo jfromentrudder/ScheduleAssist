@@ -14,6 +14,32 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
+class Theme(str, enum.Enum):
+    """Colour palettes a user can pick in settings. All share one block grammar."""
+
+    EMBER = "ember"          # default: cool slate, amber reserved for periods
+    TIDE = "tide"
+    MERIDIAN = "meridian"
+    GRAPHITE = "graphite"
+    DAYLIGHT = "daylight"
+    SIGNAL = "signal"
+
+
+class Appearance(str, enum.Enum):
+    """Light/dark choice. SYSTEM defers to the browser."""
+
+    SYSTEM = "system"
+    LIGHT = "light"
+    DARK = "dark"
+
+
+_THEME = Enum(Theme, name="theme", native_enum=False, create_constraint=True,
+              values_callable=lambda e: [m.value for m in e])
+_APPEARANCE = Enum(Appearance, name="appearance", native_enum=False,
+                   create_constraint=True,
+                   values_callable=lambda e: [m.value for m in e])
+
+
 class EventType(str, enum.Enum):
     """What kind of thing an event is, from the scheduler's point of view."""
 
@@ -79,6 +105,13 @@ class User(Base):
     # different instant in Corvallis than in UTC. Everything else is stored UTC.
     timezone: Mapped[str] = mapped_column(
         String(64), default="UTC", server_default="UTC")
+
+    # --- Appearance. Stored per user so it follows them between devices. ---
+    theme: Mapped[Theme] = mapped_column(
+        _THEME, default=Theme.EMBER, server_default=Theme.EMBER.value)
+    appearance: Mapped[Appearance] = mapped_column(
+        _APPEARANCE, default=Appearance.SYSTEM,
+        server_default=Appearance.SYSTEM.value)
 
 
 class AuthIdentity(Base):

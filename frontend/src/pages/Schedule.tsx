@@ -96,7 +96,7 @@ export function Schedule() {
       {state.status === 'error' && (
         <div className="schedule-status" role="alert">
           <p>{state.message}</p>
-          <button className="counter" onClick={() => void load(weekStart)}>
+          <button className="button" onClick={() => void load(weekStart)}>
             Try again
           </button>
         </div>

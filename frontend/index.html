@@ -1,10 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="ember" data-mode="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>ScheduleAssist</title>
+    <script>
+      // Runs before first paint so a reload never flashes the wrong theme.
+      // ThemeProvider takes over once React mounts and re-syncs from the server.
+      (function () {
+        var THEMES = ['ember', 'tide', 'meridian', 'graphite', 'daylight', 'signal']
+        var root = document.documentElement
+        try {
+          var theme = localStorage.getItem('sa-theme')
+          var appearance = localStorage.getItem('sa-appearance')
+          if (THEMES.indexOf(theme) !== -1) root.dataset.theme = theme
+          var mode =
+            appearance === 'light' || appearance === 'dark'
+              ? appearance
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+          root.dataset.mode = mode
+          root.style.colorScheme = mode
+        } catch (e) {
+          // Storage blocked — fall back to the attributes already on <html>.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

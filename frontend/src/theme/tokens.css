@@ -1,0 +1,171 @@
+/* Theme palettes.
+ *
+ * Every theme defines the same token names; nothing in the app reads a raw hex
+ * value. Adding a seventh theme is a block in this file plus an entry in
+ * constants.ts — never a change to a component.
+ *
+ * ThemeProvider resolves "system" to a concrete mode and stamps both
+ * data-theme and data-mode on <html>, so the selectors below are always exact
+ * and there is no prefers-color-scheme fallback to keep in sync.
+ *
+ * Token contract:
+ *   ground / surface / off   page, raised bars, non-workday shading
+ *   line / line-soft         borders, hour rules
+ *   ink / ink-2 / ink-3      primary, secondary, muted text
+ *   accent / accent-bg       chrome: today, now line, focus, primary actions
+ *   today                    today-column tint
+ *   imp|man|per (+ -bg)      the three event categories
+ *   due                      deadlines
+ *   danger (+ -bg)           destructive actions
+ */
+
+/* ============================================================ EMBER (default)
+   Cool slate everywhere, with amber as the only warm colour in the system —
+   reserved for what the app generates. */
+[data-theme='ember'][data-mode='light'] {
+  --ground: #ffffff; --surface: #f8fafc; --off: #f1f5f9;
+  --line: #e2e8f0; --line-soft: #eef2f7;
+  --ink: #0f172a; --ink-2: #64748b; --ink-3: #94a3b8;
+  --accent: #b45309; --accent-bg: rgb(180 83 9 / 0.10); --today: #fdf6ec;
+  --imp: #2563eb; --imp-bg: rgb(37 99 235 / 0.11);
+  --man: #475569; --man-bg: rgb(71 85 105 / 0.12);
+  --per: #b45309; --per-bg: rgb(180 83 9 / 0.10);
+  --due: #be123c;
+  --danger: #be123c; --danger-bg: rgb(190 18 60 / 0.10);
+}
+[data-theme='ember'][data-mode='dark'] {
+  --ground: #0b1120; --surface: #121b2c; --off: #101827;
+  --line: #223049; --line-soft: #192437;
+  --ink: #e8eef7; --ink-2: #8da3bf; --ink-3: #6b809c;
+  --accent: #f0a020; --accent-bg: rgb(240 160 32 / 0.15); --today: #241d12;
+  --imp: #60a5fa; --imp-bg: rgb(96 165 250 / 0.15);
+  --man: #94a3b8; --man-bg: rgb(148 163 184 / 0.14);
+  --per: #f0a020; --per-bg: rgb(240 160 32 / 0.14);
+  --due: #f0637a;
+  --danger: #f0637a; --danger-bg: rgb(240 99 122 / 0.14);
+}
+
+/* ===================================================================== TIDE
+   Teal-biased neutrals, airy and low contrast. */
+[data-theme='tide'][data-mode='light'] {
+  --ground: #ffffff; --surface: #f6fafa; --off: #f0f5f5;
+  --line: #dce8e8; --line-soft: #eaf1f1;
+  --ink: #10201f; --ink-2: #566a6b; --ink-3: #859798;
+  --accent: #0f766e; --accent-bg: rgb(15 118 110 / 0.10); --today: #eefaf7;
+  --imp: #3e6b94; --imp-bg: rgb(62 107 148 / 0.13);
+  --man: #a35a12; --man-bg: rgb(163 90 18 / 0.13);
+  --per: #0f766e; --per-bg: rgb(15 118 110 / 0.09);
+  --due: #be123c;
+  --danger: #be123c; --danger-bg: rgb(190 18 60 / 0.10);
+}
+[data-theme='tide'][data-mode='dark'] {
+  --ground: #101a1a; --surface: #162222; --off: #142020;
+  --line: #26393a; --line-soft: #1d2d2e;
+  --ink: #e6f0ef; --ink-2: #92a8a8; --ink-3: #718687;
+  --accent: #45b3a5; --accent-bg: rgb(69 179 165 / 0.14); --today: #142b29;
+  --imp: #7fa9d4; --imp-bg: rgb(127 169 212 / 0.16);
+  --man: #e0a15c; --man-bg: rgb(224 161 92 / 0.16);
+  --per: #45b3a5; --per-bg: rgb(69 179 165 / 0.13);
+  --due: #f06b8a;
+  --danger: #f06b8a; --danger-bg: rgb(240 107 138 / 0.14);
+}
+
+/* ================================================================= MERIDIAN
+   Saturated, high-legibility hues on a cool neutral ground. */
+[data-theme='meridian'][data-mode='light'] {
+  --ground: #ffffff; --surface: #f9fafb; --off: #f2f4f7;
+  --line: #e4e7ec; --line-soft: #f0f2f5;
+  --ink: #101828; --ink-2: #475467; --ink-3: #7d8798;
+  --accent: #1a56db; --accent-bg: rgb(26 86 219 / 0.10); --today: #eff4ff;
+  --imp: #1a56db; --imp-bg: rgb(26 86 219 / 0.12);
+  --man: #b54708; --man-bg: rgb(181 71 8 / 0.12);
+  --per: #036672; --per-bg: rgb(3 102 114 / 0.12);
+  --due: #b42318;
+  --danger: #b42318; --danger-bg: rgb(180 35 24 / 0.10);
+}
+[data-theme='meridian'][data-mode='dark'] {
+  --ground: #0c111d; --surface: #141b2d; --off: #111827;
+  --line: #26324a; --line-soft: #1b2439;
+  --ink: #f3f6fa; --ink-2: #93a2ba; --ink-3: #71809a;
+  --accent: #6699ff; --accent-bg: rgb(102 153 255 / 0.15); --today: #16203a;
+  --imp: #6699ff; --imp-bg: rgb(102 153 255 / 0.16);
+  --man: #e08034; --man-bg: rgb(224 128 52 / 0.16);
+  --per: #22a6b3; --per-bg: rgb(34 166 179 / 0.16);
+  --due: #e8635a;
+  --danger: #e8635a; --danger-bg: rgb(232 99 90 / 0.14);
+}
+
+/* ================================================================= GRAPHITE
+   Blue-biased greys, one blue accent. The most conventional of the six. */
+[data-theme='graphite'][data-mode='light'] {
+  --ground: #ffffff; --surface: #f8f9fb; --off: #f4f6f8;
+  --line: #e2e6ec; --line-soft: #eef1f5;
+  --ink: #14171c; --ink-2: #5c6573; --ink-3: #8a93a1;
+  --accent: #2563eb; --accent-bg: rgb(37 99 235 / 0.10); --today: #eef4ff;
+  --imp: #2563eb; --imp-bg: rgb(37 99 235 / 0.11);
+  --man: #0f766e; --man-bg: rgb(15 118 110 / 0.11);
+  --per: #64748b; --per-bg: rgb(100 116 139 / 0.10);
+  --due: #dc2626;
+  --danger: #dc2626; --danger-bg: rgb(220 38 38 / 0.10);
+}
+[data-theme='graphite'][data-mode='dark'] {
+  --ground: #14161a; --surface: #1a1d23; --off: #191c21;
+  --line: #2a2f38; --line-soft: #22262d;
+  --ink: #e9ecf1; --ink-2: #98a2b1; --ink-3: #76808f;
+  --accent: #60a5fa; --accent-bg: rgb(96 165 250 / 0.15); --today: #172132;
+  --imp: #60a5fa; --imp-bg: rgb(96 165 250 / 0.16);
+  --man: #2dd4bf; --man-bg: rgb(45 212 191 / 0.15);
+  --per: #94a3b8; --per-bg: rgb(148 163 184 / 0.13);
+  --due: #f87171;
+  --danger: #f87171; --danger-bg: rgb(248 113 113 / 0.14);
+}
+
+/* ================================================================= DAYLIGHT
+   Warm greys and a moss accent. The least clinical of the six. */
+[data-theme='daylight'][data-mode='light'] {
+  --ground: #fdfcfa; --surface: #ffffff; --off: #f5f3ef;
+  --line: #e7e3dc; --line-soft: #f0ede7;
+  --ink: #221f1a; --ink-2: #6b6459; --ink-3: #948c7f;
+  --accent: #4e7a58; --accent-bg: rgb(78 122 88 / 0.12); --today: #eef3ec;
+  --imp: #45688c; --imp-bg: rgb(69 104 140 / 0.12);
+  --man: #a86a2e; --man-bg: rgb(168 106 46 / 0.13);
+  --per: #4e7a58; --per-bg: rgb(78 122 88 / 0.13);
+  --due: #b5443a;
+  --danger: #b5443a; --danger-bg: rgb(181 68 58 / 0.11);
+}
+[data-theme='daylight'][data-mode='dark'] {
+  --ground: #1a1917; --surface: #211f1d; --off: #201e1b;
+  --line: #35322d; --line-soft: #2a2825;
+  --ink: #efece6; --ink-2: #a49b8d; --ink-3: #857c6f;
+  --accent: #86b591; --accent-bg: rgb(134 181 145 / 0.15); --today: #1f2a21;
+  --imp: #8fb2d6; --imp-bg: rgb(143 178 214 / 0.15);
+  --man: #e0a463; --man-bg: rgb(224 164 99 / 0.15);
+  --per: #86b591; --per-bg: rgb(134 181 145 / 0.16);
+  --due: #e0776c;
+  --danger: #e0776c; --danger-bg: rgb(224 119 108 / 0.14);
+}
+
+/* =================================================================== SIGNAL
+   Near-monochrome. Only the generated period carries a saturated hue. */
+[data-theme='signal'][data-mode='light'] {
+  --ground: #ffffff; --surface: #fbfbfc; --off: #f6f6f7;
+  --line: #e4e4e7; --line-soft: #efeff1;
+  --ink: #0b0b0d; --ink-2: #6d6d76; --ink-3: #96969e;
+  --accent: #0d9f6e; --accent-bg: rgb(13 159 110 / 0.11); --today: #f3f4f6;
+  --imp: #71717a; --imp-bg: rgb(113 113 122 / 0.13);
+  --man: #0b0b0d; --man-bg: rgb(11 11 13 / 0.09);
+  --per: #0d9f6e; --per-bg: rgb(13 159 110 / 0.13);
+  --due: #dc2f36;
+  --danger: #dc2f36; --danger-bg: rgb(220 47 54 / 0.10);
+}
+[data-theme='signal'][data-mode='dark'] {
+  --ground: #0d0d0f; --surface: #141417; --off: #121215;
+  --line: #26262b; --line-soft: #1d1d21;
+  --ink: #fafafa; --ink-2: #9b9ba4; --ink-3: #74747d;
+  --accent: #2bc48a; --accent-bg: rgb(43 196 138 / 0.14); --today: #17171b;
+  --imp: #a1a1aa; --imp-bg: rgb(161 161 170 / 0.14);
+  --man: #fafafa; --man-bg: rgb(250 250 250 / 0.12);
+  --per: #2bc48a; --per-bg: rgb(43 196 138 / 0.15);
+  --due: #f0555c;
+  --danger: #f0555c; --danger-bg: rgb(240 85 92 / 0.14);
+}

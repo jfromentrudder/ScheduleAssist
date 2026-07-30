@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { APPEARANCES, THEMES } from '../theme/constants'
+import { useTheme } from '../theme/useTheme'
 
-type Account = {
+type AccountDetails = {
   id: number
   email: string
   display_name: string | null
@@ -11,10 +13,25 @@ type Account = {
   providers: string[]
 }
 
+/** Live preview of a theme's category colours, rendered in the current mode. */
+function ThemeSwatches({ themeId }: { themeId: string }) {
+  const { mode } = useTheme()
+  return (
+    <span className="swatch-row" data-theme={themeId} data-mode={mode} aria-hidden="true">
+      <i style={{ background: 'var(--imp)' }} />
+      <i style={{ background: 'var(--man)' }} />
+      <i style={{ background: 'var(--per-bg)', border: '1px dashed var(--per)' }} />
+      <i style={{ background: 'var(--due)' }} />
+    </span>
+  )
+}
+
 export function Account() {
   const { refresh, signOut } = useAuth()
+  const { theme, appearance, setTheme, setAppearance } = useTheme()
   const navigate = useNavigate()
-  const [account, setAccount] = useState<Account | null>(null)
+
+  const [account, setAccount] = useState<AccountDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -47,37 +64,79 @@ export function Account() {
   }
 
   return (
-    <section id="center">
-      <div>
-        <h1>Account</h1>
+    <div className="panel">
+      <h1 style={{ fontSize: 32, margin: 0 }}>Account</h1>
 
-        {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{error}</p>}
 
+      <section>
+        <h3>Profile</h3>
         {account && (
           <dl>
             <dt>Name</dt>
             <dd>{account.display_name ?? '—'}</dd>
             <dt>Email</dt>
-            <dd>
-              <code>{account.email}</code>
-            </dd>
+            <dd>{account.email}</dd>
             <dt>Signs in with</dt>
             <dd>{account.providers.join(', ') || '—'}</dd>
             <dt>Member since</dt>
             <dd>{new Date(account.created_at).toLocaleDateString()}</dd>
           </dl>
         )}
+      </section>
 
-        <button className="counter" onClick={handleSignOut} disabled={busy}>
-          Sign out
-        </button>
-        <button className="counter danger" onClick={handleDelete} disabled={busy}>
-          Delete account
-        </button>
-        <p>
-          <Link to="/">Back to schedule</Link>
-        </p>
-      </div>
-    </section>
+      <section>
+        <h3>Appearance</h3>
+
+        <div className="field">
+          <label id="theme-label">Theme</label>
+          <div className="choices" role="group" aria-labelledby="theme-label">
+            {THEMES.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="choice"
+                aria-pressed={theme === option.id}
+                onClick={() => setTheme(option.id)}
+              >
+                <ThemeSwatches themeId={option.id} />
+                {option.label}
+                <small>{option.hint}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label id="appearance-label">Light or dark</label>
+          <div className="choices" role="group" aria-labelledby="appearance-label">
+            {APPEARANCES.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="choice"
+                aria-pressed={appearance === option.id}
+                onClick={() => setAppearance(option.id)}
+              >
+                {option.label}
+                {option.hint && <small>{option.hint}</small>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h3>Session</h3>
+        <div className="actions">
+          <button className="button quiet" onClick={handleSignOut} disabled={busy}>
+            Sign out
+          </button>
+          <button className="button danger" onClick={handleDelete} disabled={busy}>
+            Delete account
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }

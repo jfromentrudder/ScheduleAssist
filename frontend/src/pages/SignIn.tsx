@@ -23,7 +23,7 @@ export function SignIn() {
         <p>A smart scheduler for bad schedulers.</p>
 
         {authError && <p role="alert">Sign-in failed or was cancelled — try again.</p>}
-        <a className="counter" href="/api/auth/google/login">
+        <a className="button" href="/api/auth/google/login">
           Sign in with Google
         </a>
       </div>

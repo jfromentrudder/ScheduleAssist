@@ -127,7 +127,15 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "email": user.email, "display_name": user.display_name}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        # Included here so the UI can apply the saved theme on first paint
+        # rather than after a second request.
+        "theme": user.theme.value,
+        "appearance": user.appearance.value,
+    }
 
 
 @router.post("/logout", status_code=204)
