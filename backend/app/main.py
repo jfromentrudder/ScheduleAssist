@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.account import router as account_router
 from app.auth import router as auth_router
 from app.config import settings
 from app.database import get_db
@@ -16,6 +17,7 @@ app = FastAPI(title="ScheduleAssist API")
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 app.include_router(auth_router)
+app.include_router(account_router)
 
 app.add_middleware(
     CORSMiddleware,
