@@ -1,23 +1,25 @@
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
 
-from app import models  # noqa: F401  (ensures models are registered with Base)
+from app.account import router as account_router
+from app.auth import router as auth_router
 from app.config import settings
-from app.database import Base, engine, get_db
+from app.database import get_db
+from app.schedule import router as schedule_router
 
+# Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
+app = FastAPI(title="ScheduleAssist API")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Dev convenience: create tables on startup. Switch to Alembic migrations later.
-    Base.metadata.create_all(bind=engine)
-    yield
+# Only used by Authlib to hold OAuth state/nonce across the redirect handshake;
+# app sessions live in the sessions table, not in this cookie.
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
-
-app = FastAPI(title="ScheduleAssist API", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(account_router)
+app.include_router(schedule_router)
 
 app.add_middleware(
     CORSMiddleware,
