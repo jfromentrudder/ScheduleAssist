@@ -8,6 +8,7 @@ from app.account import router as account_router
 from app.auth import router as auth_router
 from app.config import settings
 from app.database import get_db
+from app.schedule import router as schedule_router
 
 # Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
 app = FastAPI(title="ScheduleAssist API")
@@ -18,6 +19,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 app.include_router(auth_router)
 app.include_router(account_router)
+app.include_router(schedule_router)
 
 app.add_middleware(
     CORSMiddleware,

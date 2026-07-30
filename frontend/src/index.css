@@ -51,7 +51,8 @@
 }
 
 #root {
-  width: 1126px;
+  /* Wide enough for seven readable day columns in the week view. */
+  width: 1280px;
   max-width: 100%;
   margin: 0 auto;
   text-align: center;

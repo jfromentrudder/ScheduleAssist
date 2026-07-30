@@ -1,10 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import './App.css'
+import { Layout } from './Layout'
 import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './auth/RequireAuth'
 import { Account } from './pages/Account'
-import { Home } from './pages/Home'
+import { Schedule } from './pages/Schedule'
 import { SignIn } from './pages/SignIn'
 
 function App() {
@@ -14,8 +15,10 @@ function App() {
         <Routes>
           <Route path="/signin" element={<SignIn />} />
           <Route element={<RequireAuth />}>
-            <Route path="/" element={<Home />} />
-            <Route path="/account" element={<Account />} />
+            <Route element={<Layout />}>
+              <Route path="/" element={<Schedule />} />
+              <Route path="/account" element={<Account />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
