@@ -12,8 +12,13 @@ type LoadState =
 export function Schedule() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
   const [state, setState] = useState<LoadState>({ status: 'loading' })
-  // Fixed per render pass so the "today" highlight can't drift mid-week-change.
-  const [now] = useState(() => new Date())
+  // Updated periodically so the "current time" line stays accurate.
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const load = useCallback(async (start: Date) => {
     setState({ status: 'loading' })
