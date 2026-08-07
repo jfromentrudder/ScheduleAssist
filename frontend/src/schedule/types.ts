@@ -20,6 +20,8 @@ export type SchedulePeriod = {
   id: number
   starts_at: string
   ends_at: string
+  /** Inside the commitment horizon, so regeneration will not move it. */
+  locked: boolean
   /** The events this block was generated to serve. */
   events: { id: number; title: string }[]
 }
@@ -31,12 +33,16 @@ export type Preferences = {
   day_end: string
   period_minutes: number
   timezone: string
+  /** Days ahead, counting today, that the schedule is treated as settled. */
+  schedule_horizon_days: number
 }
 
 export type Schedule = {
   start: string
   end: string
   preferences: Preferences
+  /** Local midnight where the settled part of the schedule ends. */
+  horizon_ends_at: string
   events: ScheduleEvent[]
   periods: SchedulePeriod[]
 }

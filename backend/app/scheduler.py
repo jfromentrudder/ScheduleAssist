@@ -8,17 +8,35 @@ produce the same periods. That is what makes this unit-testable and what lets
 All datetimes crossing this boundary are UTC. The user's timezone matters in
 exactly one place — deciding which instants count as "9am on a workday" — and
 is applied per day so that a DST shift moves the workday with it.
+
+The engine never decides what to do about a shortfall. It reports one, and the
+caller offers the user the choice: accept it, extend their hours, or rebuild
+the whole schedule. Those three outcomes are all expressible as another call
+with different arguments, which is why there is no "mode" parameter here.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Iterable
 from zoneinfo import ZoneInfo
 
 # A deadline whose event carries no prep estimate still deserves a block of
 # time; the model's NULL means "unknown", not "zero work". Inferred deadlines
 # will frequently land here.
 DEFAULT_PERIODS_PER_TASK = 1
+
+# --- Commitment horizon -------------------------------------------------
+# How far ahead the schedule is treated as settled. Periods inside the horizon
+# are not reshuffled when new events arrive, because a plan that rearranges
+# itself the evening before is not a plan anyone can rely on.
+DEFAULT_HORIZON_DAYS = 5  # A standard work week, counting today.
+MIN_HORIZON_DAYS = 1
+MAX_HORIZON_DAYS = 21
+
+# Bounds worth warning about, but not forbidding.
+SHORT_HORIZON_DAYS = 2
+LONG_HORIZON_DAYS = 14
 
 Interval = tuple[datetime, datetime]
 
@@ -55,19 +73,26 @@ class Task:
 
 @dataclass(frozen=True)
 class PeriodPlan:
-    """One generated work block, ready to become a Period row."""
+    """One work block, ready to become (or already backed by) a Period row.
+
+    `period_id` is set only for periods that already exist in the database.
+    Combined with `locked` it tells the caller what to write: locked periods
+    are left alone, everything else is replaced.
+    """
 
     starts_at: datetime
     ends_at: datetime
     event_ids: tuple[int, ...]
+    period_id: int | None = None
+    locked: bool = False
 
 
 @dataclass(frozen=True)
 class Unmet:
     """A task the window could not fully accommodate.
 
-    Surfaced rather than swallowed so the UI can tell the user their week is
-    overbooked instead of silently under-scheduling them.
+    Surfaced rather than swallowed so the caller can ask the user how to
+    resolve it instead of silently under-scheduling them.
     """
 
     event_id: int
@@ -78,8 +103,15 @@ class Unmet:
 
 @dataclass(frozen=True)
 class SchedulePlan:
+    """Every period that should exist in the window, locked ones included."""
+
     periods: tuple[PeriodPlan, ...]
     unmet: tuple[Unmet, ...]
+
+    @property
+    def new_periods(self) -> tuple[PeriodPlan, ...]:
+        """The periods the caller needs to write; the rest already exist."""
+        return tuple(p for p in self.periods if not p.locked)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -93,15 +125,44 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _merge_busy(busy: list[BusyBlock]) -> list[Interval]:
-    """Sort and coalesce busy blocks so overlaps are subtracted only once."""
-    intervals = sorted(
-        (_as_utc(b.starts_at), _as_utc(b.ends_at)) for b in busy
-    )
+def horizon_warning(days: int) -> str | None:
+    """Copy for a horizon at either extreme, or None when it is unremarkable."""
+    if days <= SHORT_HORIZON_DAYS:
+        return (
+            "A short horizon means your schedule can be rearranged with very "
+            "little notice, including work you planned to do tomorrow."
+        )
+    if days >= LONG_HORIZON_DAYS:
+        return (
+            "A long horizon means new deadlines will mostly be scheduled weeks "
+            "out, because the time before then is already committed."
+        )
+    return None
+
+
+def freeze_boundary(now: datetime, horizon_days: int, tz: ZoneInfo) -> datetime:
+    """The first instant that is still open to rescheduling.
+
+    The horizon counts today as day one and always lands on a local midnight,
+    so the frozen edge moves once a day rather than creeping forward
+    continuously — and can never fall in the middle of a period.
+    """
+    today = _as_utc(now).astimezone(tz).date()
+    first_open_day = today + timedelta(days=horizon_days)
+    return _as_utc(datetime.combine(first_open_day, time(0, 0), tzinfo=tz))
+
+
+def is_locked(period: PeriodPlan, boundary: datetime) -> bool:
+    """True when a period starts inside the frozen horizon."""
+    return _as_utc(period.starts_at) < _as_utc(boundary)
+
+
+def _union(intervals: Iterable[Interval]) -> list[Interval]:
+    """Sort and coalesce intervals so overlaps are counted only once."""
     merged: list[Interval] = []
-    for start, end in intervals:
+    for start, end in sorted(intervals):
         if end <= start:
-            continue  # Degenerate block; nothing to subtract.
+            continue  # Degenerate; nothing to contribute.
         if merged and start <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
@@ -109,7 +170,7 @@ def _merge_busy(busy: list[BusyBlock]) -> list[Interval]:
     return merged
 
 
-def _subtract_busy(window: Interval, merged: list[Interval]) -> list[Interval]:
+def _subtract(window: Interval, merged: list[Interval]) -> list[Interval]:
     """Return the parts of `window` left free by already-merged busy blocks."""
     lo, hi = window
     free: list[Interval] = []
@@ -163,35 +224,47 @@ def available_slots(
     window_start: datetime,
     window_end: datetime,
     now: datetime,
+    extra_windows: Iterable[Interval] = (),
 ) -> list[Interval]:
     """Every free, whole period in the window, earliest first.
 
-    Slots never start in the past, never fall outside the user's workdays or
-    working hours, and never overlap a busy block.
+    Slots never start in the past and never overlap a busy block. They fall
+    inside the user's workdays and working hours, plus any `extra_windows` the
+    user explicitly opted into — that is the "work outside my usual hours"
+    escape hatch, so those windows deliberately ignore workdays.
     """
     tz = ZoneInfo(prefs.timezone)
     # Nothing is schedulable in the past, so the window effectively opens now.
     floor = max(_as_utc(window_start), _as_utc(now))
     cap = _as_utc(window_end)
-    if floor >= cap or prefs.period_minutes <= 0 or not prefs.workdays:
+    if floor >= cap or prefs.period_minutes <= 0:
         return []
 
-    merged = _merge_busy(busy)
+    candidates: list[Interval] = []
+    if prefs.workdays:
+        # Walk local dates: a UTC day and a local workday are not the same span.
+        day = floor.astimezone(tz).date()
+        last_day = cap.astimezone(tz).date()
+        while day <= last_day:
+            if day.weekday() in prefs.workdays:
+                candidates.append(_workday_bounds(day, prefs, tz))
+            day += timedelta(days=1)
+    candidates.extend((_as_utc(s), _as_utc(e)) for s, e in extra_windows)
+
+    # Union before chunking so that extended hours abutting a normal day form
+    # one continuous run of periods instead of stranding a gap at the seam.
+    unavailable = _union((_as_utc(b.starts_at), _as_utc(b.ends_at))
+                         for b in busy)
+
     slots: list[Interval] = []
+    for start, end in _union(candidates):
+        lo, hi = max(start, floor), min(end, cap)
+        if lo >= hi:
+            continue
+        for free in _subtract((lo, hi), unavailable):
+            slots.extend(_chunk(free, prefs.period_minutes))
 
-    # Walk local dates: a UTC day and a local workday are not the same span.
-    day = floor.astimezone(tz).date()
-    last_day = cap.astimezone(tz).date()
-    while day <= last_day:
-        if day.weekday() in prefs.workdays:
-            start, end = _workday_bounds(day, prefs, tz)
-            # Clip to the requested window and to the present.
-            lo, hi = max(start, floor), min(end, cap)
-            if lo < hi:
-                for free in _subtract_busy((lo, hi), merged):
-                    slots.extend(_chunk(free, prefs.period_minutes))
-        day += timedelta(days=1)
-
+    slots.sort()
     return slots
 
 
@@ -209,6 +282,8 @@ def generate(
     window_start: datetime,
     window_end: datetime,
     now: datetime,
+    locked: Iterable[PeriodPlan] = (),
+    extra_windows: Iterable[Interval] = (),
 ) -> SchedulePlan:
     """Allocate work periods for `tasks` into the free time in the window.
 
@@ -217,23 +292,41 @@ def generate(
     people who would otherwise leave the work until the night before, so given
     a choice between two valid slots it always picks the earlier one.
 
+    `locked` periods are treated as immovable: they occupy their time like any
+    other commitment, and they count toward their own task's allocation so it
+    is not scheduled twice. Passing none is a full rebuild.
+
     Ties are broken by event id so the output is stable across runs.
     """
-    slots = available_slots(prefs, busy, window_start, window_end, now)
+    # Normalize on the way in, not just for arithmetic: locked periods are
+    # echoed straight into the result, and a naive one from the database would
+    # otherwise make the final sort compare naive against aware.
+    locked = tuple(
+        replace(p, locked=True,
+                starts_at=_as_utc(p.starts_at), ends_at=_as_utc(p.ends_at))
+        for p in locked
+    )
+
+    # To the allocator an immovable period is indistinguishable from a meeting.
+    occupied = list(busy) + [BusyBlock(p.starts_at, p.ends_at) for p in locked]
+    slots = available_slots(prefs, occupied, window_start,
+                            window_end, now, extra_windows)
     consumed = [False] * len(slots)
     floor = max(_as_utc(window_start), _as_utc(now))
 
-    periods: list[PeriodPlan] = []
+    periods: list[PeriodPlan] = list(locked)
     unmet: list[Unmet] = []
 
     for task in sorted(tasks, key=lambda t: (_as_utc(t.due_at), t.event_id)):
         due = _as_utc(task.due_at)
         needed = _periods_needed(task, prefs.period_minutes)
+        # Work already committed inside the horizon still counts as done.
+        already = sum(1 for p in locked if task.event_id in p.event_ids)
 
         taken: list[int] = []
         if due > floor:
-            for index, (start, end) in enumerate(slots):
-                if len(taken) == needed:
+            for index, (_, end) in enumerate(slots):
+                if len(taken) >= needed - already:
                     break
                 # A period only helps if the work finishes before it is due.
                 if not consumed[index] and end <= due:
@@ -244,12 +337,13 @@ def generate(
             start, end = slots[index]
             periods.append(PeriodPlan(start, end, (task.event_id,)))
 
-        if len(taken) < needed:
+        allocated = already + len(taken)
+        if allocated < needed:
             unmet.append(
                 Unmet(
                     event_id=task.event_id,
                     periods_needed=needed,
-                    periods_allocated=len(taken),
+                    periods_allocated=allocated,
                     reason="overdue" if due <= floor else "no free time before deadline",
                 )
             )

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { ResolveDialog } from '../schedule/ResolveDialog'
 import { WeekView } from '../schedule/WeekView'
+import { generateSchedule } from '../schedule/generate'
+import type { GenerateRequest, NeedsDecision } from '../schedule/generate'
 import type { Schedule as ScheduleData } from '../schedule/types'
 import { DAYS_IN_WEEK, addDays, formatWeekRange, startOfWeek } from '../schedule/week'
 
@@ -14,6 +17,11 @@ export function Schedule() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   // Updated periodically so the "current time" line stays accurate.
   const [now, setNow] = useState(() => new Date())
+  const [generating, setGenerating] = useState(false)
+  // Set only when the server needs the user to choose how to resolve a
+  // shortfall. Until it is cleared, nothing has been written.
+  const [decision, setDecision] = useState<NeedsDecision | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000)
@@ -43,6 +51,45 @@ export function Schedule() {
   useEffect(() => {
     void load(weekStart)
   }, [load, weekStart])
+
+  const runGenerate = useCallback(
+    async (request: GenerateRequest = {}) => {
+      setGenerating(true)
+      setNotice(null)
+      try {
+        const result = await generateSchedule(request)
+        if (result.committed) {
+          setDecision(null)
+          const kept = result.periods_kept
+          setNotice(
+            `Scheduled ${result.periods_created} new ${
+              result.periods_created === 1 ? 'period' : 'periods'
+            }${kept ? `, keeping ${kept} already settled` : ''}.`,
+          )
+          await load(weekStart)
+        } else {
+          // Nothing written yet — hand the choice to the user.
+          setDecision(result)
+        }
+      } catch {
+        setNotice('Could not generate your schedule. Please try again.')
+      } finally {
+        setGenerating(false)
+      }
+    },
+    [load, weekStart],
+  )
+
+  const titleOf = useCallback(
+    (eventId: number) => {
+      if (state.status !== 'ready') return 'this deadline'
+      return (
+        state.data.events.find((e) => e.id === eventId)?.title ??
+        'a deadline outside this week'
+      )
+    },
+    [state],
+  )
 
   const thisWeek = startOfWeek(now)
   const isCurrentWeek = weekStart.getTime() === thisWeek.getTime()
@@ -76,6 +123,13 @@ export function Schedule() {
               Today
             </button>
           )}
+          <button
+            className="button"
+            onClick={() => void runGenerate()}
+            disabled={generating || state.status !== 'ready'}
+          >
+            {generating ? 'Generating…' : 'Generate schedule'}
+          </button>
         </div>
 
         <ul className="legend">
@@ -87,6 +141,9 @@ export function Schedule() {
           </li>
           <li>
             <span className="swatch kind-period" /> Work period
+          </li>
+          <li>
+            <span className="swatch kind-settled" /> Settled
           </li>
           <li>
             <span className="swatch kind-deadline" /> Deadline
@@ -107,6 +164,12 @@ export function Schedule() {
         </div>
       )}
 
+      {notice && (
+        <p className="schedule-status" role="status">
+          {notice}
+        </p>
+      )}
+
       {state.status === 'ready' && (
         <>
           {isEmpty && (
@@ -117,6 +180,16 @@ export function Schedule() {
           )}
           <WeekView schedule={state.data} weekStart={weekStart} now={now} />
         </>
+      )}
+
+      {decision && (
+        <ResolveDialog
+          result={decision}
+          titleOf={titleOf}
+          busy={generating}
+          onResolve={(request) => void runGenerate(request)}
+          onCancel={() => setDecision(null)}
+        />
       )}
     </section>
   )

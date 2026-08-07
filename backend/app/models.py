@@ -6,6 +6,9 @@ import enum
 
 from app.crypto import EncryptedString
 from app.database import Base  # noqa: F401
+from app.scheduler import (
+    DEFAULT_HORIZON_DAYS, MAX_HORIZON_DAYS, MIN_HORIZON_DAYS,
+)
 from datetime import datetime, time
 from sqlalchemy import (
     CheckConstraint, Column, DateTime, Enum, ForeignKey, Index, String, Table,
@@ -68,6 +71,13 @@ _EVENT_SOURCE = Enum(EventSource, name="event_source", native_enum=False,
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Bounds mirror the engine's constants so the database, the API and the
+        # generator cannot drift apart on what a legal horizon is.
+        CheckConstraint(
+            f"schedule_horizon_days BETWEEN {MIN_HORIZON_DAYS} AND {MAX_HORIZON_DAYS}",
+            name="ck_users_horizon_range"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
@@ -101,6 +111,13 @@ class User(Base):
     # Length of one generated work period.
     period_minutes: Mapped[int] = mapped_column(
         default=50, server_default=text("50"))
+    # How many days ahead — counting today — the schedule is treated as
+    # settled. Periods inside this horizon are not reshuffled when new events
+    # arrive, because a plan that rearranges itself the night before is not a
+    # plan. See app/scheduler.py for how it is applied.
+    schedule_horizon_days: Mapped[int] = mapped_column(
+        default=DEFAULT_HORIZON_DAYS,
+        server_default=text(str(DEFAULT_HORIZON_DAYS)))
     # The wall-clock times above are meaningless without a zone: 09:00 is a
     # different instant in Corvallis than in UTC. Everything else is stored UTC.
     timezone: Mapped[str] = mapped_column(

@@ -168,6 +168,42 @@ main {
   color: var(--ink-3);
 }
 
+.field-hint {
+  margin: -2px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+
+/* Advisory, not an error: the value is allowed, just worth understanding. */
+.field-warning {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+  max-width: 60ch;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  input[type='range'] {
+    flex: 1;
+    max-width: 320px;
+    accent-color: var(--accent);
+  }
+
+  output {
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink);
+    min-width: 6ch;
+  }
+}
+
 .choices {
   display: flex;
   flex-wrap: wrap;
@@ -303,6 +339,7 @@ main {
 .swatch.kind-imported { background: var(--imp); }
 .swatch.kind-manual { background: var(--man); }
 .swatch.kind-period { background: var(--per-bg); border: 1px dashed var(--per); }
+.swatch.kind-settled { background: var(--per-bg); border: 1px solid var(--per); }
 .swatch.kind-deadline { background: var(--due); }
 
 .schedule-status {
@@ -440,6 +477,105 @@ main {
   pointer-events: none;
 }
 
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.modal {
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+}
+
+.unmet-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    background: var(--surface);
+  }
+
+  span {
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+}
+
+/* Stacked, not a row: these are consequential choices and deserve to be read
+   rather than scanned. */
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.window-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  input {
+    font: inherit;
+    padding: 6px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--ground);
+    color: var(--ink);
+    color-scheme: light dark;
+  }
+}
+
+/* The commitment horizon. Everything left of this rule is settled, so it
+   separates day columns rather than blocks — a neutral grey, deliberately
+   outside the block colour grammar. */
+.week-col.is-horizon,
+.week-day-head.is-horizon {
+  border-left: 2px solid var(--ink-3);
+}
+
 .block {
   position: absolute;
   overflow: hidden;
@@ -483,6 +619,12 @@ main {
   background: var(--per-bg);
   border: 1px dashed var(--per);
   color: var(--per);
+}
+
+/* Inside the commitment horizon the same block firms up to a solid edge:
+   dashed still means generated, solid adds "and settled". No new colour. */
+.block.kind-period.is-locked {
+  border-style: solid;
 }
 
 .deadline {

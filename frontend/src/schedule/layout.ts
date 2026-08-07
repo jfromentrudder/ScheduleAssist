@@ -20,6 +20,8 @@ export type Block = {
   /** Column position among mutually-overlapping blocks. */
   lane: number
   laneCount: number
+  /** Periods only: settled inside the horizon, so it will not be moved. */
+  locked?: boolean
 }
 
 export type DeadlineMarker = {
@@ -119,7 +121,8 @@ export function buildDayBlocks(
       key: `period-${period.id}`,
       kind: 'period',
       title: period.events.map((e) => e.title).join(', ') || 'Work period',
-      subtitle: 'Work period',
+      subtitle: period.locked ? 'Settled' : 'Work period',
+      locked: period.locked,
     })
   }
 

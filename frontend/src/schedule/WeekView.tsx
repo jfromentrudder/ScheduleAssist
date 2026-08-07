@@ -69,17 +69,27 @@ export function WeekView({ schedule, weekStart, now }: Props) {
   const nowMinutes = minutesSinceMidnight(now)
   const nowVisible = nowMinutes >= bounds.startMin && nowMinutes <= bounds.endMin
 
+  // The horizon always lands on a local midnight, so it separates whole day
+  // columns rather than cutting through one.
+  const horizonEnd = new Date(schedule.horizon_ends_at)
+  const isSettled = (day: Date) => day < horizonEnd
+  // Mark the first open day only when a settled one precedes it, so the rule
+  // is not drawn against the left edge of a week that is entirely open.
+  const horizonIndex = days.findIndex(
+    (day, i) => !isSettled(day) && i > 0 && isSettled(days[i - 1]),
+  )
+
   return (
     <div className="week" style={{ '--px-per-minute': PX_PER_MINUTE } as React.CSSProperties}>
       <div className="week-head">
         <div className="week-gutter" aria-hidden="true" />
-        {days.map((day) => {
+        {days.map((day, i) => {
           const isToday = isSameDay(day, now)
           const isWorkday = workdays.has((day.getDay() + 6) % 7)
           return (
             <div
               key={day.toISOString()}
-              className={`week-day-head${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}`}
+              className={`week-day-head${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}${i === horizonIndex ? ' is-horizon' : ''}`}
             >
               <span className="week-dow">
                 {day.toLocaleDateString([], { weekday: 'short' })}
@@ -117,13 +127,13 @@ export function WeekView({ schedule, weekStart, now }: Props) {
           ))}
         </div>
 
-        {perDay.map(({ day, blocks, markers }) => {
+        {perDay.map(({ day, blocks, markers }, i) => {
           const isToday = isSameDay(day, now)
           const isWorkday = workdays.has((day.getDay() + 6) % 7)
           return (
             <div
               key={day.toISOString()}
-              className={`week-col${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}`}
+              className={`week-col${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}${i === horizonIndex ? ' is-horizon' : ''}`}
             >
               {hourLines.map((minutes) => (
                 <div key={minutes} className="week-line" style={{ top: `${offsetOf(minutes)}px` }} />
@@ -132,7 +142,7 @@ export function WeekView({ schedule, weekStart, now }: Props) {
               {blocks.map((block) => (
                 <article
                   key={block.key}
-                  className={`block kind-${block.kind}`}
+                  className={`block kind-${block.kind}${block.locked ? ' is-locked' : ''}`}
                   style={{
                     top: `${offsetOf(block.startMin)}px`,
                     height: `${(block.endMin - block.startMin) * PX_PER_MINUTE}px`,
