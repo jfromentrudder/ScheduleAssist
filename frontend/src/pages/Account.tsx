@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { Calendars } from '../calendars/Calendars'
 import { APPEARANCES, THEMES } from '../theme/constants'
 import { useTheme } from '../theme/useTheme'
 
@@ -148,6 +149,8 @@ export function Account() {
           </div>
         </div>
       </section>
+
+      <Calendars />
 
       <section>
         <h3>Scheduling</h3>

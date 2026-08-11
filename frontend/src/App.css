@@ -477,6 +477,45 @@ main {
   pointer-events: none;
 }
 
+.connection-list {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  li {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.connection-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+
+  &.warn {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+}
+
 .modal-scrim {
   position: fixed;
   inset: 0;

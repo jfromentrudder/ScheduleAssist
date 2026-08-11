@@ -43,6 +43,24 @@ _APPEARANCE = Enum(Appearance, name="appearance", native_enum=False,
                    values_callable=lambda e: [m.value for m in e])
 
 
+class CalendarKind(str, enum.Enum):
+    """What sort of calendar a connection is, chosen by the user at connect time.
+
+    This is not cosmetic: school calendars routinely express assignments as
+    all-day events, so deadline inference reads them differently from work
+    calendars. PERSONAL is the conservative default — no title inference.
+    """
+
+    SCHOOL = "school"
+    WORK = "work"
+    PERSONAL = "personal"
+
+
+_CALENDAR_KIND = Enum(CalendarKind, name="calendar_kind", native_enum=False,
+                      create_constraint=True,
+                      values_callable=lambda e: [m.value for m in e])
+
+
 class EventType(str, enum.Enum):
     """What kind of thing an event is, from the scheduler's point of view."""
 
@@ -184,6 +202,10 @@ class CalendarConnection(Base):
     provider_account_id: Mapped[str] = mapped_column(String(255))
     # Shown in the UI so the user can tell two connected accounts apart.
     account_email: Mapped[str | None] = mapped_column(String(255))
+    # Drives how this calendar's events are interpreted; see CalendarKind.
+    kind: Mapped[CalendarKind] = mapped_column(
+        _CALENDAR_KIND, default=CalendarKind.PERSONAL,
+        server_default=CalendarKind.PERSONAL.value)
 
     # Encrypted at rest — see app/crypto.py. The refresh token is nullable
     # because Google only returns one on the first consent for a given account.
