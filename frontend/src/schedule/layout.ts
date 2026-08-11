@@ -22,6 +22,9 @@ export type Block = {
   laneCount: number
   /** Periods only: settled inside the horizon, so it will not be moved. */
   locked?: boolean
+  /** The event this block came from, for opening its detail. Absent on
+   *  periods, which are generated rather than edited. */
+  eventId?: number
 }
 
 export type DeadlineMarker = {
@@ -29,6 +32,19 @@ export type DeadlineMarker = {
   title: string
   atMin: number
   source: 'imported' | 'manual'
+  eventId: number
+}
+
+/** A span of the day the user is available to work in.
+ *
+ * Rendered as a background rather than a block: periods sit *inside* it, so it
+ * must not take a lane or compete for width. */
+export type WorkWindow = {
+  key: string
+  title: string
+  startMin: number
+  endMin: number
+  eventId: number
 }
 
 type Placed = { startMin: number; endMin: number }
@@ -98,6 +114,8 @@ export function buildDayBlocks(
   for (const event of events) {
     // Deadlines are moments, not spans; all-day events sit in their own strip.
     if (event.event_type !== 'one_time' || event.is_all_day) continue
+    // Work windows are backgrounds, not blocks — see buildWorkWindows.
+    if (event.availability === 'work_window') continue
     if (!event.starts_at || !event.ends_at) continue
 
     const span = clampToDay(new Date(event.starts_at), new Date(event.ends_at), day)
@@ -109,6 +127,7 @@ export function buildDayBlocks(
       kind: event.source,
       title: event.title,
       subtitle: event.source === 'imported' ? 'From calendar' : 'Added by you',
+      eventId: event.id,
     })
   }
 
@@ -155,8 +174,34 @@ export function buildDeadlineMarkers(
       title: event.title,
       atMin: minutesSinceMidnight(new Date(event.due_at)),
       source: event.source as 'imported' | 'manual',
+      eventId: event.id,
     }))
     .sort((a, b) => a.atMin - b.atMin)
+}
+
+/** Spans of the day the user is available to work in, clamped to `day`. */
+export function buildWorkWindows(
+  events: ScheduleEvent[],
+  day: Date,
+): WorkWindow[] {
+  const windows: WorkWindow[] = []
+
+  for (const event of events) {
+    if (event.availability !== 'work_window') continue
+    if (!event.starts_at || !event.ends_at) continue
+
+    const span = clampToDay(new Date(event.starts_at), new Date(event.ends_at), day)
+    if (!span) continue
+
+    windows.push({
+      ...span,
+      key: `window-${event.id}`,
+      title: event.title,
+      eventId: event.id,
+    })
+  }
+
+  return windows.sort((a, b) => a.startMin - b.startMin)
 }
 
 export function allDayEvents(events: ScheduleEvent[], day: Date): ScheduleEvent[] {
@@ -177,6 +222,7 @@ export function gridBounds(
   markers: DeadlineMarker[][],
   preferredStart: number,
   preferredEnd: number,
+  windows: WorkWindow[][] = [],
 ): { startMin: number; endMin: number } {
   let startMin = preferredStart
   let endMin = preferredEnd
@@ -185,6 +231,13 @@ export function gridBounds(
     for (const block of day) {
       startMin = Math.min(startMin, block.startMin)
       endMin = Math.max(endMin, block.endMin)
+    }
+  }
+  // A shift starting before the user's usual hours must not be clipped.
+  for (const day of windows) {
+    for (const window of day) {
+      startMin = Math.min(startMin, window.startMin)
+      endMin = Math.max(endMin, window.endMin)
     }
   }
   for (const day of markers) {

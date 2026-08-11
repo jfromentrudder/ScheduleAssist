@@ -17,7 +17,7 @@ from app import google_calendar
 from app.calendar_tokens import CalendarReauthRequired, get_access_token
 from app.inference import classify
 from app.models import (
-    Calendar, CalendarConnection, Event, EventSource, EventType,
+    Availability, Calendar, CalendarConnection, Event, EventSource, EventType,
 )
 
 # How much of the calendar an import covers. Wide enough to hold next term's
@@ -69,6 +69,24 @@ def deadline_moment(day: date, tz: ZoneInfo) -> datetime:
     return (midnight_after - timedelta(minutes=1)).astimezone(timezone.utc)
 
 
+def infer_availability(payload: dict, is_all_day: bool) -> Availability:
+    """Whether an imported event occupies the user's time.
+
+    Google already records this: `transparency: "transparent"` is the "Free"
+    setting in its UI. Ignoring it meant every event a user had deliberately
+    marked free was still blocking their schedule.
+
+    Nothing is inferred as a work window — that is a judgement about what the
+    user does with their time, so it stays theirs to set in #13.
+    """
+    if is_all_day:
+        # An all-day entry is a label on the day, not a claim on its hours.
+        return Availability.FREE
+    if payload.get("transparency") == "transparent":
+        return Availability.FREE
+    return Availability.BUSY
+
+
 def apply_payload(
     event: Event,
     payload: dict,
@@ -96,13 +114,14 @@ def apply_payload(
     event.is_all_day = is_all_day
 
     # A user's correction outranks any guess we would make, so re-syncing
-    # updates the wording and timing but leaves the type and estimate alone.
+    # updates the wording and timing but leaves the classification alone.
     if event.type_locked:
         verdict_type = event.event_type
     else:
         verdict = classify(title, is_all_day, kind)
         verdict_type = verdict.event_type
         event.expected_prep_minutes = verdict.prep_minutes
+        event.availability = infer_availability(payload, is_all_day)
 
     event.event_type = verdict_type
 

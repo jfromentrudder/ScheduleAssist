@@ -76,6 +76,13 @@ KEYWORDS: tuple[Keyword, ...] = (
     Keyword("test", QUICK, _ACADEMIC),
     Keyword("reading", QUICK, _ACADEMIC),
     Keyword("response", QUICK, _ACADEMIC),
+    # Canvas exports these verbatim, and they are graded work like any other.
+    Keyword("discussion", QUICK, _ACADEMIC),
+    Keyword("participation", QUICK, _ACADEMIC),
+    Keyword("exercise", QUICK, _ACADEMIC),
+    Keyword("worksheet", QUICK, _ACADEMIC),
+    Keyword("journal", QUICK, _ACADEMIC),
+    Keyword("peer review", QUICK, _ACADEMIC),
 
     # Work.
     Keyword("deliverable", SUBSTANTIAL, _PROFESSIONAL),

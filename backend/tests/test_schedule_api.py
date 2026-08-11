@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models import Event, EventSource, EventType, Period
+from app.models import Availability, Event, EventSource, EventType, Period
 from app.schedule import apply_plan, build_plan, split_events
 
 
@@ -48,22 +48,40 @@ def test_deadlines_become_tasks_and_meetings_become_busy(db_session, user):
     ])
     db_session.commit()
 
-    tasks, busy = split_events(db_session.query(Event).all())
+    tasks, busy, windows = split_events(db_session.query(Event).all())
 
     assert len(tasks) == 1 and tasks[0].prep_minutes == 120
     assert len(busy) == 1
+    assert windows == []
 
 
 def test_all_day_events_are_not_treated_as_busy(db_session, user):
     """One 'Conference' entry must not blank out a whole workable day."""
-    db_session.add(make_meeting(
+    event = make_meeting(
         user, starts_at=utc(2026, 8, 10), ends_at=utc(2026, 8, 11),
-        all_day=True, title="Conference"))
+        all_day=True, title="Conference")
+    event.availability = Availability.FREE
+    db_session.add(event)
     db_session.commit()
 
-    tasks, busy = split_events(db_session.query(Event).all())
+    _, busy, windows = split_events(db_session.query(Event).all())
 
     assert busy == []
+    assert windows == []
+
+
+def test_a_work_window_offers_time_rather_than_blocking_it(db_session, user):
+    """A shift at work is when the work happens, not a wall around it."""
+    shift = make_meeting(user, starts_at=utc(2026, 8, 10, 9),
+                         ends_at=utc(2026, 8, 10, 17), title="At work")
+    shift.availability = Availability.WORK_WINDOW
+    db_session.add(shift)
+    db_session.commit()
+
+    _, busy, windows = split_events(db_session.query(Event).all())
+
+    assert busy == []
+    assert windows == [(shift.starts_at, shift.ends_at)]
 
 
 # --- Reading the feed ---------------------------------------------------

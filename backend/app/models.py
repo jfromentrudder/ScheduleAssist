@@ -75,6 +75,23 @@ class EventSource(str, enum.Enum):
     MANUAL = "manual"      # created in ScheduleAssist
 
 
+class Availability(str, enum.Enum):
+    """What an event's time means for scheduling.
+
+    The three answers are genuinely different, and collapsing them is what
+    makes a naive scheduler useless: a meeting is time you cannot work, a
+    reminder is not time at all, and a shift at work is precisely the time you
+    *do* work — periods belong inside it, not around it.
+    """
+
+    # Occupied. The generator schedules around it.
+    BUSY = "busy"
+    # Informational. Neither blocks time nor offers any.
+    FREE = "free"
+    # Time available for work. The generator fills it with periods.
+    WORK_WINDOW = "work_window"
+
+
 # Stored as VARCHAR + CHECK rather than a native Postgres ENUM, so adding a
 # value later is an ordinary migration instead of an ALTER TYPE dance.
 # create_constraint must be set explicitly: SQLAlchemy defaults it to False,
@@ -83,6 +100,9 @@ _EVENT_TYPE = Enum(EventType, name="event_type", native_enum=False,
                    create_constraint=True,
                    values_callable=lambda e: [m.value for m in e])
 _EVENT_SOURCE = Enum(EventSource, name="event_source", native_enum=False,
+                     create_constraint=True,
+                     values_callable=lambda e: [m.value for m in e])
+_AVAILABILITY = Enum(Availability, name="availability", native_enum=False,
                      create_constraint=True,
                      values_callable=lambda e: [m.value for m in e])
 
@@ -340,6 +360,11 @@ class Event(Base):
     description: Mapped[str | None] = mapped_column(Text)
     event_type: Mapped[EventType] = mapped_column(_EVENT_TYPE)
     source: Mapped[EventSource] = mapped_column(_EVENT_SOURCE)
+    # How this event's span affects generation. Meaningless for deadlines,
+    # which are moments rather than spans.
+    availability: Mapped[Availability] = mapped_column(
+        _AVAILABILITY, default=Availability.BUSY,
+        server_default=Availability.BUSY.value)
 
     # Populated per event_type; see the CHECK constraint above.
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -357,9 +382,9 @@ class Event(Base):
     calendar_id: Mapped[int | None] = mapped_column(
         ForeignKey("calendars.id", ondelete="CASCADE"), index=True)
     provider_event_id: Mapped[str | None] = mapped_column(String(255))
-    # Set when the user corrects an inferred event type or prep estimate.
-    # Re-syncing must not overwrite a human decision with a guess, so the
-    # importer leaves these events' type and prep alone.
+    # Set when the user corrects how this event is classified — its type, prep
+    # estimate or availability. Re-syncing must not overwrite a human decision
+    # with a guess, so the importer leaves all three alone once this is set.
     type_locked: Mapped[bool] = mapped_column(
         default=False, server_default=text("false"))
 

@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Event, EventType, Period, User
+from app.models import Availability, Event, EventType, Period, User
 from app.scheduler import (
     BusyBlock,
     PeriodPlan,
@@ -50,12 +50,28 @@ def _event_json(event: Event) -> dict:
         "description": event.description,
         "event_type": event.event_type.value,
         "source": event.source.value,
+        "availability": event.availability.value,
         "starts_at": event.starts_at,
         "ends_at": event.ends_at,
         "due_at": event.due_at,
         "is_all_day": event.is_all_day,
         "expected_prep_minutes": event.expected_prep_minutes,
+        "type_locked": event.type_locked,
     }
+
+
+def shapes_the_day(event: Event) -> bool:
+    """Whether an event belongs in the generated view.
+
+    That view answers "what am I doing today", so it carries the things that
+    constrain the answer: deadlines being worked toward, commitments that take
+    real time, and the windows work happens in. What it leaves out is the
+    informational clutter — the all-day markers and reminders that would
+    otherwise bury the schedule the app exists to produce.
+    """
+    if event.event_type == EventType.DEADLINE:
+        return True
+    return event.availability in (Availability.BUSY, Availability.WORK_WINDOW)
 
 
 def _period_json(period: Period, boundary: datetime) -> dict:
@@ -84,14 +100,19 @@ def user_prefs(user: User) -> Prefs:
     )
 
 
-def split_events(events: list[Event]) -> tuple[list[Task], list[BusyBlock]]:
-    """Sort events into work to schedule and time to schedule around.
+def split_events(
+    events: list[Event],
+) -> tuple[list[Task], list[BusyBlock], list[tuple[datetime, datetime]]]:
+    """Sort events into work to do, time to avoid, and time to work in.
 
-    All-day events are not treated as busy: one "Conference" entry would
-    otherwise blank out an entire day the user could still work in.
+    The third category is what makes a shift at work usable: it is not a wall
+    to schedule around, it is the part of the day when work actually happens,
+    so the generator places periods inside it.
     """
     tasks: list[Task] = []
     busy: list[BusyBlock] = []
+    windows: list[tuple[datetime, datetime]] = []
+
     for event in events:
         if event.event_type == EventType.DEADLINE:
             tasks.append(Task(
@@ -99,9 +120,17 @@ def split_events(events: list[Event]) -> tuple[list[Task], list[BusyBlock]]:
                 due_at=event.due_at,
                 prep_minutes=event.expected_prep_minutes,
             ))
-        elif not event.is_all_day and event.starts_at and event.ends_at:
+            continue
+
+        if not event.starts_at or not event.ends_at:
+            continue
+        if event.availability == Availability.BUSY:
             busy.append(BusyBlock(event.starts_at, event.ends_at))
-    return tasks, busy
+        elif event.availability == Availability.WORK_WINDOW:
+            windows.append((event.starts_at, event.ends_at))
+        # FREE events are informational: neither blocking nor offering time.
+
+    return tasks, busy, windows
 
 
 def _load_events(db: Session, user: User, start: datetime, end: datetime) -> list[Event]:
@@ -191,7 +220,10 @@ def build_plan(
     extra_windows: list[tuple[datetime, datetime]] = (),
 ) -> SchedulePlan:
     """Run the engine over the user's current rows without writing anything."""
-    tasks, busy = split_events(_load_events(db, user, start, end))
+    tasks, busy, windows = split_events(_load_events(db, user, start, end))
+    # A work window offers time the same way the user's own working hours do,
+    # so it joins whatever extra availability the caller supplied.
+    extra_windows = [*windows, *extra_windows]
 
     locked: list[PeriodPlan] = []
     if respect_horizon:
@@ -212,10 +244,21 @@ def build_plan(
 def get_schedule(
     start: datetime,
     end: datetime,
+    view: Literal["generated", "calendar"] = "generated",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Everything that should appear on the calendar between start and end."""
+    """Everything that should appear on the calendar between start and end.
+
+    Two views over the same data, deliberately not duplicates of each other.
+    "generated" is the app's own output — the periods it allocated, the
+    deadlines they serve, and the commitments they had to work around.
+    "calendar" is the diary as the user wrote it: every entry, and no periods,
+    because generated blocks are not something they put there.
+
+    Commitments are the one thing both views carry, since a meeting matters
+    whichever question you are asking.
+    """
     if end <= start:
         raise HTTPException(status_code=422, detail="end must be after start")
     if end - start > MAX_RANGE:
@@ -226,9 +269,20 @@ def get_schedule(
     boundary = freeze_boundary(
         now, user.schedule_horizon_days, ZoneInfo(user.timezone))
 
+    events = _load_events(db, user, start, end)
+    generated = view == "generated"
+    if generated:
+        events = [e for e in events if shapes_the_day(e)]
+
+    # Periods belong to the generated view alone. Showing them alongside the
+    # raw diary would read as duplicates of the schedule rather than as the
+    # separate thing they are.
+    periods = _load_periods(db, user, start, end) if generated else []
+
     return {
         "start": start,
         "end": end,
+        "view": view,
         # The grid needs the user's working hours to know what to draw.
         "preferences": {
             "workdays": user.workdays,
@@ -239,10 +293,10 @@ def get_schedule(
             "schedule_horizon_days": user.schedule_horizon_days,
         },
         # Where the settled part of the schedule ends, so the view can mark it.
-        "horizon_ends_at": boundary,
-        "events": [_event_json(e) for e in _load_events(db, user, start, end)],
-        "periods": [_period_json(p, boundary)
-                    for p in _load_periods(db, user, start, end)],
+        # Meaningless without periods, so only the generated view draws it.
+        "horizon_ends_at": boundary if generated else None,
+        "events": [_event_json(e) for e in events],
+        "periods": [_period_json(p, boundary) for p in periods],
     }
 
 

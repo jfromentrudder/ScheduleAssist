@@ -4,6 +4,7 @@ import {
   allDayEvents,
   buildDayBlocks,
   buildDeadlineMarkers,
+  buildWorkWindows,
   gridBounds,
 } from './layout'
 import type { Schedule } from './types'
@@ -22,9 +23,11 @@ type Props = {
   schedule: Schedule
   weekStart: Date
   now: Date
+  /** Opens an event's detail. Periods are generated, so they are not editable. */
+  onSelectEvent?: (eventId: number) => void
 }
 
-export function WeekView({ schedule, weekStart, now }: Props) {
+export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
   const days = useMemo(
     () => Array.from({ length: DAYS_IN_WEEK }, (_, i) => addDays(weekStart, i)),
     [weekStart],
@@ -39,6 +42,7 @@ export function WeekView({ schedule, weekStart, now }: Props) {
         blocks: buildDayBlocks(events, periods, day),
         markers: buildDeadlineMarkers(events, day),
         allDay: allDayEvents(events, day),
+        windows: buildWorkWindows(events, day),
       })),
     [days, events, periods],
   )
@@ -50,6 +54,7 @@ export function WeekView({ schedule, weekStart, now }: Props) {
         perDay.map((d) => d.markers),
         parseClockTime(preferences.day_start),
         parseClockTime(preferences.day_end),
+        perDay.map((d) => d.windows),
       ),
     [perDay, preferences.day_start, preferences.day_end],
   )
@@ -70,9 +75,12 @@ export function WeekView({ schedule, weekStart, now }: Props) {
   const nowVisible = nowMinutes >= bounds.startMin && nowMinutes <= bounds.endMin
 
   // The horizon always lands on a local midnight, so it separates whole day
-  // columns rather than cutting through one.
-  const horizonEnd = new Date(schedule.horizon_ends_at)
-  const isSettled = (day: Date) => day < horizonEnd
+  // columns rather than cutting through one. The calendar view has no periods
+  // to settle, so it does not draw the rule at all.
+  const horizonEnd = schedule.horizon_ends_at
+    ? new Date(schedule.horizon_ends_at)
+    : null
+  const isSettled = (day: Date) => horizonEnd !== null && day < horizonEnd
   // Mark the first open day only when a settled one precedes it, so the rule
   // is not drawn against the left edge of a week that is entirely open.
   const horizonIndex = days.findIndex(
@@ -127,7 +135,7 @@ export function WeekView({ schedule, weekStart, now }: Props) {
           ))}
         </div>
 
-        {perDay.map(({ day, blocks, markers }, i) => {
+        {perDay.map(({ day, blocks, markers, windows }, i) => {
           const isToday = isSameDay(day, now)
           const isWorkday = workdays.has((day.getDay() + 6) % 7)
           return (
@@ -139,21 +147,57 @@ export function WeekView({ schedule, weekStart, now }: Props) {
                 <div key={minutes} className="week-line" style={{ top: `${offsetOf(minutes)}px` }} />
               ))}
 
-              {blocks.map((block) => (
-                <article
-                  key={block.key}
-                  className={`block kind-${block.kind}${block.locked ? ' is-locked' : ''}`}
+              {/* Behind everything: periods sit inside these, not beside them. */}
+              {windows.map((window) => (
+                <button
+                  key={window.key}
+                  type="button"
+                  className="work-window"
                   style={{
-                    top: `${offsetOf(block.startMin)}px`,
-                    height: `${(block.endMin - block.startMin) * PX_PER_MINUTE}px`,
-                    left: `${(block.lane / block.laneCount) * 100}%`,
-                    width: `${(1 / block.laneCount) * 100}%`,
+                    top: `${offsetOf(window.startMin)}px`,
+                    height: `${(window.endMin - window.startMin) * PX_PER_MINUTE}px`,
                   }}
+                  onClick={() => onSelectEvent?.(window.eventId)}
                 >
-                  <span className="block-title">{block.title}</span>
-                  <span className="block-sub">{block.subtitle}</span>
-                </article>
+                  <span className="work-window-label">{window.title}</span>
+                </button>
               ))}
+
+              {blocks.map((block) => {
+                const classes = `block kind-${block.kind}${
+                  block.locked ? ' is-locked' : ''
+                }${block.eventId && onSelectEvent ? ' is-clickable' : ''}`
+                const style = {
+                  top: `${offsetOf(block.startMin)}px`,
+                  height: `${(block.endMin - block.startMin) * PX_PER_MINUTE}px`,
+                  left: `${(block.lane / block.laneCount) * 100}%`,
+                  width: `${(1 / block.laneCount) * 100}%`,
+                }
+                const inner = (
+                  <>
+                    <span className="block-title">{block.title}</span>
+                    <span className="block-sub">{block.subtitle}</span>
+                  </>
+                )
+
+                // Only events open a detail panel; periods are generated
+                // output, so there is nothing on them to edit.
+                return block.eventId && onSelectEvent ? (
+                  <button
+                    key={block.key}
+                    type="button"
+                    className={classes}
+                    style={style}
+                    onClick={() => onSelectEvent(block.eventId!)}
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <article key={block.key} className={classes} style={style}>
+                    {inner}
+                  </article>
+                )
+              })}
 
               {markers.map((marker) => (
                 <div
@@ -161,7 +205,13 @@ export function WeekView({ schedule, weekStart, now }: Props) {
                   className="deadline"
                   style={{ top: `${offsetOf(marker.atMin)}px` }}
                 >
-                  <span className="deadline-flag">Due: {marker.title}</span>
+                  <button
+                    type="button"
+                    className="deadline-flag"
+                    onClick={() => onSelectEvent?.(marker.eventId)}
+                  >
+                    Due: {marker.title}
+                  </button>
                 </div>
               ))}
 
