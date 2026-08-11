@@ -8,16 +8,32 @@ import { useCallback, useEffect, useState } from 'react'
 
 export type CalendarKind = 'school' | 'work' | 'personal'
 
+/** One calendar inside a connected account — the checkbox rows Google shows
+ *  down its left edge, and Apple nests under each account. */
+export type Calendar = {
+  id: number
+  name: string
+  description: string | null
+  color: string | null
+  is_primary: boolean
+  selected: boolean
+  kind: CalendarKind
+  last_synced_at: string | null
+  last_sync_error: string | null
+}
+
 export type Connection = {
   id: number
   provider: string
   account_email: string | null
-  kind: CalendarKind
+  /** Seeds calendars discovered later; each calendar carries its own kind. */
+  default_kind: CalendarKind
   created_at: string
   last_synced_at: string | null
   last_sync_error: string | null
   /** False once the grant is no longer refreshable; needs reconnecting. */
   healthy: boolean
+  calendars: Calendar[]
 }
 
 const KINDS: { id: CalendarKind; label: string; hint: string }[] = [
@@ -41,6 +57,7 @@ export function Calendars() {
   const [error, setError] = useState<string | null>(null)
   const [kind, setKind] = useState<CalendarKind>('school')
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -72,15 +89,57 @@ export function Calendars() {
     window.location.href = `/api/calendars/google/connect?kind=${kind}`
   }
 
-  async function changeKind(id: number, next: CalendarKind) {
-    setBusyId(id)
-    const res = await fetch(`/api/calendars/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: next }),
+  async function updateCalendar(
+    connection: Connection,
+    calendar: Calendar,
+    change: { selected?: boolean; kind?: CalendarKind },
+  ) {
+    setBusyId(connection.id)
+    setNotice(null)
+    const res = await fetch(
+      `/api/calendars/${connection.id}/calendars/${calendar.id}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(change),
+      },
+    )
+    if (res.ok) {
+      const result = await res.json()
+      if (result.events_removed)
+        setNotice(`Removed ${result.events_removed} events from ${calendar.name}.`)
+      else if (result.events_imported)
+        setNotice(`Imported ${result.events_imported} events from ${calendar.name}.`)
+      await load()
+    } else if (res.status === 409) {
+      setError('That account needs reconnecting before it can sync.')
+    } else {
+      setError(`Could not update ${calendar.name}.`)
+    }
+    setBusyId(null)
+  }
+
+  async function resync(connection: Connection) {
+    setBusyId(connection.id)
+    setNotice(null)
+    const res = await fetch(`/api/calendars/${connection.id}/sync`, {
+      method: 'POST',
     })
-    if (res.ok) await load()
-    else setError('Could not update that calendar.')
+    if (res.ok) {
+      const result = await res.json()
+      const changed =
+        result.created + result.updated + result.deleted === 0
+          ? 'Already up to date.'
+          : `Imported ${result.created} new, updated ${result.updated}, removed ${result.deleted}.`
+      setNotice(changed)
+      await load()
+    } else if (res.status === 409) {
+      // The grant is gone; only reconnecting fixes it.
+      setError('That calendar needs reconnecting before it can sync.')
+      await load()
+    } else {
+      setError('Could not sync that calendar.')
+    }
     setBusyId(null)
   }
 
@@ -112,6 +171,12 @@ export function Calendars() {
         </p>
       )}
 
+      {notice && (
+        <p className="field-hint" role="status">
+          {notice}
+        </p>
+      )}
+
       {connections && connections.length > 0 && (
         <ul className="connection-list">
           {connections.map((connection) => (
@@ -121,24 +186,85 @@ export function Calendars() {
                 {!connection.healthy && (
                   <span className="tag warn">Needs reconnecting</span>
                 )}
+                <span className="tag">
+                  {connection.last_synced_at
+                    ? `Synced ${new Date(
+                        connection.last_synced_at,
+                      ).toLocaleString()}`
+                    : 'Not synced yet'}
+                </span>
               </div>
 
-              <div className="choices" role="group" aria-label="Calendar type">
-                {KINDS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className="choice"
-                    aria-pressed={connection.kind === option.id}
-                    disabled={busyId === connection.id}
-                    onClick={() => void changeKind(connection.id, option.id)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              {connection.last_sync_error && (
+                <p className="field-warning">{connection.last_sync_error}</p>
+              )}
+
+              {connection.calendars.length === 0 ? (
+                <p className="field-hint">
+                  No calendars found yet — sync to load them.
+                </p>
+              ) : (
+                <ul className="calendar-list">
+                  {connection.calendars.map((calendar) => (
+                    <li key={calendar.id}>
+                      <label className="calendar-check">
+                        <input
+                          type="checkbox"
+                          checked={calendar.selected}
+                          disabled={busyId === connection.id}
+                          onChange={(e) =>
+                            void updateCalendar(connection, calendar, {
+                              selected: e.target.checked,
+                            })
+                          }
+                        />
+                        <span
+                          className="calendar-dot"
+                          style={{ background: calendar.color ?? 'var(--ink-3)' }}
+                          aria-hidden="true"
+                        />
+                        <span className="calendar-name">{calendar.name}</span>
+                        {calendar.is_primary && (
+                          <span className="tag">Primary</span>
+                        )}
+                      </label>
+
+                      <select
+                        className="calendar-kind"
+                        value={calendar.kind}
+                        disabled={busyId === connection.id || !calendar.selected}
+                        aria-label={`How to read ${calendar.name}`}
+                        onChange={(e) =>
+                          void updateCalendar(connection, calendar, {
+                            kind: e.target.value as CalendarKind,
+                          })
+                        }
+                      >
+                        {KINDS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      {calendar.last_sync_error && (
+                        <p className="field-warning">
+                          {calendar.last_sync_error}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               <div className="actions">
+                <button
+                  className="button quiet"
+                  disabled={busyId === connection.id}
+                  onClick={() => void resync(connection)}
+                >
+                  {busyId === connection.id ? 'Syncing…' : 'Sync now'}
+                </button>
                 <button
                   className="button danger quiet"
                   disabled={busyId === connection.id}

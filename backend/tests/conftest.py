@@ -9,6 +9,7 @@ datetimes to UTC on entry.
 
 import os
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -24,6 +25,22 @@ from app.auth import SESSION_COOKIE, create_session  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import User  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Fail loudly on any unpatched outbound request.
+
+    Without this a test can quietly call Google for real: slow, flaky, and
+    dependent on whoever is running it. Tests that exercise provider calls
+    patch the specific function they need on top of this.
+    """
+    def blocked(*args, **kwargs):
+        raise RuntimeError(
+            "test attempted a real network call — patch the client instead")
+
+    monkeypatch.setattr(httpx, "get", blocked)
+    monkeypatch.setattr(httpx, "post", blocked)
 
 
 @pytest.fixture

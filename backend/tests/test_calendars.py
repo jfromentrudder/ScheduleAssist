@@ -12,7 +12,10 @@ from unittest.mock import patch
 import pytest
 
 from app.calendar_tokens import GOOGLE_CALENDAR_SCOPE
-from app.models import CalendarConnection, CalendarKind, Event, EventSource, EventType, User
+from app.models import (
+    Calendar, CalendarConnection, CalendarKind, Event, EventSource, EventType,
+    User,
+)
 
 
 def token_response(scope=None, refresh="refresh-token", sub="google-sub-1"):
@@ -28,17 +31,26 @@ def token_response(scope=None, refresh="refresh-token", sub="google-sub-1"):
 
 @pytest.fixture
 def callback(client):
-    """Drives the OAuth callback with a canned token response."""
+    """Drives the OAuth callback with a canned token response.
+
+    The initial import that connecting triggers is stubbed out here; it has its
+    own tests in test_sync.py.
+    """
     def run(token=None, kind=None):
         if kind:
             # Stand in for the connect step, which stashes the chosen kind.
             with client as c:
                 c.get("/api/calendars/google/connect", params={"kind": kind},
                       follow_redirects=False)
-        with patch("app.calendars.oauth.google_calendar.authorize_access_token",
-                   return_value=token or token_response()):
-            return client.get("/api/calendars/google/callback",
-                              follow_redirects=False)
+        with (
+            patch("app.calendars.oauth.google_calendar.authorize_access_token",
+                  return_value=token or token_response()),
+            patch("app.calendars.sync_quietly") as imported,
+        ):
+            response = client.get("/api/calendars/google/callback",
+                                  follow_redirects=False)
+            response.imported = imported
+            return response
     return run
 
 
@@ -55,6 +67,12 @@ def test_callback_stores_the_connection(callback, db_session, user):
     assert connection.provider == "google"
     assert connection.provider_account_id == "google-sub-1"
     assert connection.account_email == "calendar-owner@example.com"
+
+
+def test_connecting_imports_events_immediately(callback):
+    """A calendar that shows nothing until you find a sync button does not
+    look connected."""
+    assert callback().imported.called
 
 
 def test_tokens_are_stored_and_readable(callback, db_session):
@@ -143,31 +161,34 @@ def test_kind_defaults_to_personal(callback, db_session):
     """The conservative default: infer nothing from titles."""
     callback()
     assert db_session.query(CalendarConnection).one(
-    ).kind == CalendarKind.PERSONAL
+    ).default_kind == CalendarKind.PERSONAL
 
 
-def test_kind_chosen_at_connect_time_is_stored(callback, db_session):
+def test_kind_chosen_at_connect_time_seeds_the_account(callback, db_session):
+    """It is a default for discovered calendars, not the value inference uses;
+    that lives on each Calendar so one account can hold both kinds."""
     callback(kind="school")
     assert db_session.query(CalendarConnection).one(
-    ).kind == CalendarKind.SCHOOL
+    ).default_kind == CalendarKind.SCHOOL
 
 
-def test_kind_can_be_changed_without_reconnecting(callback, client, db_session):
+def test_the_account_default_can_be_changed_later(callback, client, db_session):
+    """Only seeds calendars discovered from now on; existing ones keep theirs."""
     callback()
     connection = db_session.query(CalendarConnection).one()
 
     response = client.patch(f"/api/calendars/{connection.id}",
-                            json={"kind": "work"})
+                            json={"default_kind": "work"})
 
     assert response.status_code == 200
-    assert response.json()["kind"] == "work"
+    assert response.json()["default_kind"] == "work"
 
 
 def test_an_unknown_kind_is_rejected(callback, client, db_session):
     callback()
     connection = db_session.query(CalendarConnection).one()
     response = client.patch(f"/api/calendars/{connection.id}",
-                            json={"kind": "holiday"})
+                            json={"default_kind": "holiday"})
     assert response.status_code == 422
 
 
@@ -180,9 +201,11 @@ def test_listing_reports_connection_state(callback, client):
     assert len(body["connections"]) == 1
     entry = body["connections"][0]
     assert entry["account_email"] == "calendar-owner@example.com"
-    assert entry["kind"] == "school"
+    assert entry["default_kind"] == "school"
     assert entry["healthy"] is True
     assert entry["last_synced_at"] is None
+    # Discovery runs during the import, which this fixture stubs out.
+    assert entry["calendars"] == []
 
 
 def test_a_connection_without_a_refresh_token_reads_as_unhealthy(
@@ -208,12 +231,16 @@ def test_disconnecting_removes_the_connection(callback, client, db_session):
 
 
 def test_disconnecting_removes_imported_events(callback, client, db_session, user):
-    """The CASCADE the schema already declares, exercised end to end."""
+    """The CASCADE the schema declares, from account through calendar to event."""
     callback()
     connection = db_session.query(CalendarConnection).one()
+    calendar = Calendar(calendar_connection_id=connection.id,
+                        provider_calendar_id="primary", name="Primary")
+    db_session.add(calendar)
+    db_session.commit()
     db_session.add(Event(
         user_id=user.id, title="Imported lecture", event_type=EventType.ONE_TIME,
-        source=EventSource.IMPORTED, calendar_connection_id=connection.id,
+        source=EventSource.IMPORTED, calendar_id=calendar.id,
         provider_event_id="evt-1",
         starts_at=datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
         ends_at=datetime(2026, 8, 10, 11, tzinfo=timezone.utc),
@@ -256,7 +283,7 @@ def test_another_users_connection_is_not_visible(callback, client, db_session):
 
     assert client.get("/api/calendars").json()["connections"] == []
     assert client.patch(f"/api/calendars/{stolen.id}",
-                        json={"kind": "work"}).status_code == 404
+                        json={"default_kind": "work"}).status_code == 404
     assert client.delete(f"/api/calendars/{stolen.id}").status_code == 404
 
 
