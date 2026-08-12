@@ -168,6 +168,42 @@ main {
   color: var(--ink-3);
 }
 
+.field-hint {
+  margin: -2px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+
+/* Advisory, not an error: the value is allowed, just worth understanding. */
+.field-warning {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+  max-width: 60ch;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  input[type='range'] {
+    flex: 1;
+    max-width: 320px;
+    accent-color: var(--accent);
+  }
+
+  output {
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink);
+    min-width: 6ch;
+  }
+}
+
 .choices {
   display: flex;
   flex-wrap: wrap;
@@ -303,6 +339,8 @@ main {
 .swatch.kind-imported { background: var(--imp); }
 .swatch.kind-manual { background: var(--man); }
 .swatch.kind-period { background: var(--per-bg); border: 1px dashed var(--per); }
+.swatch.kind-settled { background: var(--per-bg); border: 1px solid var(--per); }
+.swatch.kind-meal { background: var(--surface); border: 1px dashed var(--ink-3); }
 .swatch.kind-deadline { background: var(--due); }
 
 .schedule-status {
@@ -440,6 +478,234 @@ main {
   pointer-events: none;
 }
 
+.connection-list {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  li {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+/* Sub-calendars, nested under the account they belong to. */
+.calendar-list {
+  margin: 0;
+  padding: 0 0 0 2px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+  }
+}
+
+.calendar-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+
+  input[type='checkbox'] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+}
+
+/* The colour the user already recognises from Google or Apple. */
+.calendar-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.calendar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-kind {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+  color: var(--ink);
+
+  &:disabled {
+    opacity: 0.45;
+  }
+}
+
+.connection-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+
+  &.warn {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+}
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.modal {
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+}
+
+.unmet-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    background: var(--surface);
+  }
+
+  span {
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+}
+
+/* Stacked, not a row: these are consequential choices and deserve to be read
+   rather than scanned. */
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.window-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  input {
+    font: inherit;
+    padding: 6px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--ground);
+    color: var(--ink);
+    color-scheme: light dark;
+  }
+}
+
+/* The commitment horizon. Everything left of this rule is settled, so it
+   separates day columns rather than blocks — a neutral grey, deliberately
+   outside the block colour grammar. */
+.week-col.is-horizon,
+.week-day-head.is-horizon {
+  border-left: 2px solid var(--ink-3);
+}
+
+/* Time the user is available to work in. A background, not a block: periods
+   sit inside it, so it spans the column and stays behind them. */
+.work-window {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 0;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.work-window-label {
+  display: block;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .block {
   position: absolute;
   overflow: hidden;
@@ -450,6 +716,17 @@ main {
   line-height: 1.15;
   /* Hairline separation between side-by-side blocks without altering layout. */
   outline: 2px solid var(--ground);
+}
+
+/* Blocks backed by an event open their detail; generated periods do not. */
+button.block {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.04);
+  }
 }
 
 .block-title {
@@ -485,6 +762,21 @@ main {
   color: var(--per);
 }
 
+/* Inside the commitment horizon the same block firms up to a solid edge:
+   dashed still means generated, solid adds "and settled". No new colour. */
+.block.kind-period.is-locked {
+  border-style: solid;
+}
+
+/* Also generated, so it keeps the dashed edge — but it is time held clear
+   rather than allocated, so it takes a neutral colour instead of the one
+   reserved for work. */
+.block.kind-meal {
+  background: var(--surface);
+  border: 1px dashed var(--ink-3);
+  color: var(--ink-2);
+}
+
 .deadline {
   position: absolute;
   inset-inline: 0;
@@ -498,14 +790,64 @@ main {
   top: 1px;
   left: 2px;
   right: 2px;
+  font: inherit;
   font-size: 10.5px;
+  text-align: left;
   color: var(--ground);
   background: var(--due);
+  border: 0;
   border-radius: 5px;
   padding: 0 5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The marker row ignores pointer events; its flag must not. */
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Sticks to the bottom so a preference changed at the top of a long settings
+   page still offers the rebuild that makes it take effect. */
+.stale-banner {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--ink-2);
+
+  span {
+    flex: 1;
+    min-width: 220px;
+  }
+}
+
+.view-switch {
+  display: flex;
+  gap: 4px;
+
+  .choice {
+    padding: 5px 12px;
+  }
+}
+
+.text-input {
+  font: inherit;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+  color: var(--ink);
+  color-scheme: light dark;
+  resize: vertical;
 }
 
 .now-line {

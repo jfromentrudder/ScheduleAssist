@@ -6,8 +6,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.account import router as account_router
 from app.auth import router as auth_router
+from app.calendars import router as calendars_router
 from app.config import settings
 from app.database import get_db
+from app.events import router as events_router
 from app.schedule import router as schedule_router
 
 # Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
@@ -19,11 +21,13 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 app.include_router(auth_router)
 app.include_router(account_router)
+app.include_router(calendars_router)
+app.include_router(events_router)
 app.include_router(schedule_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

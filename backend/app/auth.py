@@ -135,6 +135,9 @@ def me(user: User = Depends(get_current_user)):
         # rather than after a second request.
         "theme": user.theme.value,
         "appearance": user.appearance.value,
+        # The week grid positions every block in this zone, and needs it before
+        # it can decide which week "this week" even is.
+        "timezone": user.timezone,
     }
 
 

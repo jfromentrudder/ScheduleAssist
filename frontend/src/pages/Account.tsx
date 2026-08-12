@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { Calendars } from '../calendars/Calendars'
+import { Scheduling } from '../settings/Scheduling'
+import type { SchedulingPrefs } from '../settings/Scheduling'
 import { APPEARANCES, THEMES } from '../theme/constants'
 import { useTheme } from '../theme/useTheme'
 
-type AccountDetails = {
+type AccountDetails = SchedulingPrefs & {
   id: number
   email: string
   display_name: string | null
@@ -34,6 +37,9 @@ export function Account() {
   const [account, setAccount] = useState<AccountDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+  // True once a preference changes that the current schedule was not built with.
+  const [stale, setStale] = useState(false)
 
   useEffect(() => {
     fetch('/api/account')
@@ -41,6 +47,59 @@ export function Account() {
       .then(setAccount)
       .catch(() => setError('Could not load your account details.'))
   }, [])
+
+  async function savePrefs(change: Partial<SchedulingPrefs>) {
+    // Optimistic: a slider must track the thumb, not the network. The response
+    // carries the authoritative values and any warning.
+    setAccount((current) => (current ? { ...current, ...change } : current))
+    setError(null)
+    setSaving(true)
+
+    const res = await fetch('/api/account', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(change),
+    })
+
+    if (res.ok) {
+      const saved = await res.json()
+      setAccount(saved)
+      // These preferences decide what a generated schedule looks like, so the
+      // existing one no longer reflects them.
+      if (saved.schedule_stale) setStale(true)
+    } else {
+      const detail = await res.json().catch(() => null)
+      setError(
+        typeof detail?.detail === 'string'
+          ? detail.detail
+          : 'Could not save that setting.',
+      )
+      // Roll the optimistic change back to whatever the server still holds.
+      const fresh = await fetch('/api/account')
+      if (fresh.ok) setAccount(await fresh.json())
+    }
+    setSaving(false)
+  }
+
+  async function regenerate() {
+    setSaving(true)
+    const res = await fetch('/api/schedule/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // A full rebuild, not the additive default. The periods that break the
+      // new settings are usually inside the horizon, and an additive pass
+      // protects exactly those — leaving the schedule visibly wrong.
+      body: JSON.stringify({ strategy: 'rebuild' }),
+    })
+    setSaving(false)
+    if (!res.ok) {
+      setError('Could not rebuild your schedule.')
+      return
+    }
+    setStale(false)
+    // A shortfall needs the choice dialog, which lives on the schedule page.
+    if (!(await res.json()).committed) navigate('/')
+  }
 
   async function handleSignOut() {
     setBusy(true)
@@ -125,6 +184,29 @@ export function Account() {
           </div>
         </div>
       </section>
+
+      <Calendars />
+
+      {account && (
+        <Scheduling prefs={account} onSave={savePrefs} busy={saving} />
+      )}
+
+      {stale && (
+        <div className="stale-banner" role="status">
+          <span>
+            Your schedule was built with the old settings. Rebuilding moves
+            every period to match them, including ones already settled inside
+            your horizon.
+          </span>
+          <button
+            className="button"
+            disabled={saving}
+            onClick={() => void regenerate()}
+          >
+            {saving ? 'Rebuilding…' : 'Rebuild schedule'}
+          </button>
+        </div>
+      )}
 
       <section>
         <h3>Session</h3>
