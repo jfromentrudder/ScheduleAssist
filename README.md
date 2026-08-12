@@ -45,12 +45,28 @@ just as well for students who want extra structure.
 frontend/   React + TypeScript + Vite
 backend/    FastAPI + SQLAlchemy
   app/
-    main.py       app entrypoint, routes
-    config.py     settings (env vars / .env)
-    database.py   engine, session, Base
-    models.py     ORM models
+    main.py         app entrypoint, router wiring
+    config.py       settings (env vars / .env)
+    database.py     engine, session, Base
+    models.py       ORM models
+    planning.py     turns rows into engine input, and the result back into rows
+    core/           pure logic — no HTTP, no database, no clock
+      scheduler.py    period allocation
+      inference.py    guesses which imported events are deadlines
+    integrations/   the only code that talks to other people's systems
+      tokens.py       OAuth token lifecycle (provider-generic)
+      google_calendar.py
+      sync.py         imports and reconciles calendar events
+    api/            routers, one per resource
+  alembic/        migrations
+  tests/          pytest suite
 docker-compose.yml   PostgreSQL 16
 ```
+
+The three packages each hold to one rule, which is what makes the layout worth
+having: `core/` imports nothing that does I/O, `integrations/` is the only place
+network calls live, and `api/` reaches the engine through `planning.py` rather
+than calling it directly.
 
 ## Prerequisites
 

@@ -1,38 +1,32 @@
 """Schedule API: read the calendar feed, and generate the periods on it.
 
-The generator itself lives in `app/scheduler.py` and knows nothing about HTTP
-or the database. This module is the adapter: it loads rows, hands plain
-dataclasses to the engine, and writes the result back.
+Request handling and serialisation only. Turning rows into something the engine
+understands — and writing the result back — is `app/planning.py`; the engine
+itself is `app/core/scheduler.py` and knows nothing about HTTP or the database.
 
 Generation deliberately does not resolve its own shortfalls. When the schedule
 cannot absorb a new deadline, the endpoint reports what fell short and which
 remedies would actually work, and the user chooses. See `generate_schedule`.
 """
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import and_, delete, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
 from app.api.auth import get_current_user
+from app.core.scheduler import PeriodPlan, SchedulePlan, freeze_boundary, is_locked
 from app.database import get_db
-from app.models import (
-    Availability, Event, EventType, Period, PeriodKind, User,
-)
-from app.core.scheduler import (
-    BusyBlock,
-    PeriodPlan,
-    Prefs,
-    SchedulePlan,
-    Task,
-    freeze_boundary,
-    generate,
-    is_locked,
+from app.models import Event, Period, User
+from app.planning import (
+    apply_plan,
+    build_plan,
+    load_events,
+    load_periods,
+    shapes_the_day,
 )
 
 router = APIRouter(prefix="/api/schedule", tags=["schedule"])
@@ -63,20 +57,6 @@ def _event_json(event: Event) -> dict:
     }
 
 
-def shapes_the_day(event: Event) -> bool:
-    """Whether an event belongs in the generated view.
-
-    That view answers "what am I doing today", so it carries the things that
-    constrain the answer: deadlines being worked toward, commitments that take
-    real time, and the windows work happens in. What it leaves out is the
-    informational clutter — the all-day markers and reminders that would
-    otherwise bury the schedule the app exists to produce.
-    """
-    if event.event_type == EventType.DEADLINE:
-        return True
-    return event.availability in (Availability.BUSY, Availability.WORK_WINDOW)
-
-
 def _period_json(period: Period, boundary: datetime) -> dict:
     return {
         "id": period.id,
@@ -90,178 +70,6 @@ def _period_json(period: Period, boundary: datetime) -> dict:
         # The events this block was generated to serve, for labelling.
         "events": [{"id": e.id, "title": e.title} for e in period.events],
     }
-
-
-# --- Mapping between ORM rows and the engine's plain dataclasses ---------
-
-def user_prefs(user: User) -> Prefs:
-    return Prefs(
-        workdays=tuple(user.workdays),
-        day_start=user.day_start,
-        day_end=user.day_end,
-        period_minutes=user.period_minutes,
-        timezone=user.timezone,
-    )
-
-
-@dataclass(frozen=True)
-class EngineInputs:
-    """What the events in a window mean to the generator."""
-
-    tasks: list[Task]
-    busy: list[BusyBlock]
-    windows: list[tuple[datetime, datetime]]
-    # Meals the user placed themselves, which override the generated break.
-    meals: list[tuple[datetime, datetime]]
-
-
-def split_events(events: list[Event]) -> EngineInputs:
-    """Sort events into work to do, time to avoid, and time to work in.
-
-    Work windows are what makes a shift usable: not a wall to schedule around,
-    but the part of the day when work actually happens, so periods go inside
-    them. A meal both occupies its time and settles that day's break.
-    """
-    inputs = EngineInputs(tasks=[], busy=[], windows=[], meals=[])
-
-    for event in events:
-        if event.event_type == EventType.DEADLINE:
-            inputs.tasks.append(Task(
-                event_id=event.id,
-                due_at=event.due_at,
-                prep_minutes=event.expected_prep_minutes,
-            ))
-            continue
-
-        if not event.starts_at or not event.ends_at:
-            continue
-        span = (event.starts_at, event.ends_at)
-
-        if event.availability == Availability.BUSY:
-            inputs.busy.append(BusyBlock(*span))
-        elif event.availability == Availability.WORK_WINDOW:
-            inputs.windows.append(span)
-        elif event.availability == Availability.MEAL:
-            # Occupies time like any commitment, and stands in for the break
-            # the generator would otherwise reserve.
-            inputs.busy.append(BusyBlock(*span))
-            inputs.meals.append(span)
-        # FREE events are informational: neither blocking nor offering time.
-
-    return inputs
-
-
-def _load_events(db: Session, user: User, start: datetime, end: datetime) -> list[Event]:
-    return list(db.scalars(
-        select(Event)
-        .where(
-            Event.user_id == user.id,
-            or_(
-                # Timed events overlapping the window, not merely starting in it.
-                and_(Event.starts_at < end, Event.ends_at > start),
-                and_(Event.due_at >= start, Event.due_at < end),
-            ),
-        )
-        .order_by(Event.starts_at, Event.due_at)
-    ))
-
-
-def _load_periods(db: Session, user: User, start: datetime, end: datetime) -> list[Period]:
-    return list(db.scalars(
-        select(Period)
-        .options(selectinload(Period.events))
-        .where(
-            Period.user_id == user.id,
-            Period.starts_at < end,
-            Period.ends_at > start,
-        )
-        .order_by(Period.starts_at)
-    ))
-
-
-def as_period_plan(period: Period) -> PeriodPlan:
-    return PeriodPlan(
-        starts_at=period.starts_at,
-        ends_at=period.ends_at,
-        event_ids=tuple(sorted(e.id for e in period.events)),
-        period_id=period.id,
-    )
-
-
-def apply_plan(
-    db: Session,
-    user: User,
-    plan: SchedulePlan,
-    start: datetime,
-    end: datetime,
-    now: datetime,
-) -> None:
-    """Replace the user's unlocked periods in the window with the plan's.
-
-    Locked rows are matched by id and left untouched. Anything already under
-    way is left alone too: rewriting a period the user is sitting in the middle
-    of is never the right answer.
-    """
-    keep = {p.period_id for p in plan.periods if p.locked and p.period_id}
-
-    stale = select(Period.id).where(
-        Period.user_id == user.id,
-        Period.starts_at < end,
-        Period.ends_at > start,
-        Period.starts_at >= now,
-    )
-    if keep:
-        stale = stale.where(Period.id.notin_(keep))
-    doomed = list(db.scalars(stale))
-    if doomed:
-        db.execute(delete(Period).where(Period.id.in_(doomed)))
-
-    events = {e.id: e for e in _load_events(db, user, start, end)}
-    for planned in plan.new_periods:
-        period = Period(
-            user_id=user.id,
-            starts_at=planned.starts_at,
-            ends_at=planned.ends_at,
-        )
-        period.events = [events[i] for i in planned.event_ids if i in events]
-        db.add(period)
-
-    # Meals are written too, so the time reads as deliberately held rather
-    # than as an unexplained gap in the day.
-    for meal_start, meal_end in plan.meals:
-        if meal_start >= now:
-            db.add(Period(user_id=user.id, starts_at=meal_start,
-                          ends_at=meal_end, kind=PeriodKind.MEAL))
-    db.commit()
-
-
-def build_plan(
-    db: Session,
-    user: User,
-    start: datetime,
-    end: datetime,
-    now: datetime,
-    respect_horizon: bool,
-    extra_windows: list[tuple[datetime, datetime]] = (),
-) -> SchedulePlan:
-    """Run the engine over the user's current rows without writing anything."""
-    inputs = split_events(_load_events(db, user, start, end))
-    # A work window offers time the same way the user's own working hours do,
-    # so it joins whatever extra availability the caller supplied.
-    extra_windows = [*inputs.windows, *extra_windows]
-
-    locked: list[PeriodPlan] = []
-    if respect_horizon:
-        boundary = freeze_boundary(
-            now, user.schedule_horizon_days, ZoneInfo(user.timezone))
-        locked = [as_period_plan(p) for p in _load_periods(db, user, start, end)
-                  if is_locked(as_period_plan(p), boundary)]
-
-    return generate(
-        inputs.tasks, inputs.busy, user_prefs(user), start, end, now,
-        locked=locked, extra_windows=extra_windows,
-        meal_minutes=user.lunch_minutes, existing_meals=inputs.meals,
-    )
 
 
 # --- Endpoints ----------------------------------------------------------
@@ -295,7 +103,7 @@ def get_schedule(
     boundary = freeze_boundary(
         now, user.schedule_horizon_days, ZoneInfo(user.timezone))
 
-    events = _load_events(db, user, start, end)
+    events = load_events(db, user, start, end)
     generated = view == "generated"
     if generated:
         events = [e for e in events if shapes_the_day(e)]
@@ -303,7 +111,7 @@ def get_schedule(
     # Periods belong to the generated view alone. Showing them alongside the
     # raw diary would read as duplicates of the schedule rather than as the
     # separate thing they are.
-    periods = _load_periods(db, user, start, end) if generated else []
+    periods = load_periods(db, user, start, end) if generated else []
 
     return {
         "start": start,

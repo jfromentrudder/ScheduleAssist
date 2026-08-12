@@ -17,7 +17,7 @@ from app.models import (
     Calendar, CalendarConnection, CalendarKind, Event, EventSource, EventType,
     Period, PeriodKind,
 )
-from app.api.periods import clear_orphaned_periods
+from app.planning import clear_orphaned_periods
 from app.integrations.sync import clear_calendar
 
 

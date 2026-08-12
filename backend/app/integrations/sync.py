@@ -19,7 +19,7 @@ from app.core.inference import classify
 from app.models import (
     Availability, Calendar, CalendarConnection, Event, EventSource, EventType,
 )
-from app.api.periods import clear_orphaned_periods
+from app.planning import clear_orphaned_periods
 
 # How much of the calendar an import covers. Wide enough to hold next term's
 # deadlines, bounded so a decade-old calendar is not dragged in wholesale.

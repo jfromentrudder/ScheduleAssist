@@ -1,62 +1,27 @@
-"""Removing generated periods, by hand and automatically.
+"""Removing a generated period by hand.
 
 Periods are derived data — generating again replaces them — but a user still
 needs to delete one directly. The block might sit over something the calendar
 does not know about, or be a meal break they do not want held that day.
 
-The other half of this module is the cleanup that keeps derived data honest. A
-work period exists to serve an event, so when every event it served is gone the
-period is left holding time for work that no longer exists. Nothing else
-removes it: `period_events` rows cascade away with the event, which empties the
-link but leaves the period behind.
+Cleanup of periods orphaned by a *deleted event* is a different job with
+different callers, and lives in `app/planning.py` beside the code that writes
+them.
 """
 
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
-from app.database import get_db
-from app.models import Period, PeriodKind, User, period_events
 from app.core.scheduler import PeriodPlan, freeze_boundary, is_locked
+from app.database import get_db
+from app.models import Period, User
 
 router = APIRouter(prefix="/api/periods", tags=["periods"])
-
-
-def clear_orphaned_periods(db: Session, user_id: int) -> int:
-    """Delete work periods that no longer serve any event.
-
-    Call this after anything that removes events — a deadline deleted by hand,
-    a calendar unticked or disconnected, an event cancelled at the provider.
-
-    Meal periods are deliberately exempt. They serve no event by design, so a
-    blanket "period with no events" rule would delete every one of them.
-
-    This ignores the commitment horizon on purpose: the freeze protects a plan
-    the user can still act on, and there is nothing left to act on once the
-    work is gone.
-    """
-    served = (
-        select(period_events.c.period_id)
-        .where(period_events.c.period_id == Period.id)
-        .exists()
-    )
-    orphaned = list(db.scalars(
-        select(Period.id).where(
-            Period.user_id == user_id,
-            Period.kind == PeriodKind.WORK,
-            ~served,
-        )
-    ))
-    if not orphaned:
-        return 0
-
-    db.execute(delete(Period).where(Period.id.in_(orphaned)))
-    db.commit()
-    return len(orphaned)
 
 
 @router.delete("/{period_id}", status_code=204)

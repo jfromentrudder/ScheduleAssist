@@ -29,7 +29,7 @@ from app.integrations.tokens import (
 from app.config import settings
 from app.database import get_db
 from app.models import Calendar, CalendarConnection, CalendarKind, User
-from app.api.periods import clear_orphaned_periods
+from app.planning import clear_orphaned_periods
 from app.integrations.sync import clear_calendar, sync_calendar, sync_connection, sync_quietly
 
 router = APIRouter(prefix="/api/calendars", tags=["calendars"])

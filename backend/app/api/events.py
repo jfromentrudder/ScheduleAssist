@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Availability, Event, EventSource, EventType, User
-from app.api.periods import clear_orphaned_periods
+from app.planning import clear_orphaned_periods
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
