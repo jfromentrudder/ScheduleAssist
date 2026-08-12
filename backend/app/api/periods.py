@@ -18,10 +18,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Period, PeriodKind, User, period_events
-from app.scheduler import PeriodPlan, freeze_boundary, is_locked
+from app.core.scheduler import PeriodPlan, freeze_boundary, is_locked
 
 router = APIRouter(prefix="/api/periods", tags=["periods"])
 

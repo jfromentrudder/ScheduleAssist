@@ -12,7 +12,7 @@ import pytest
 from app.models import (
     Availability, Event, EventSource, EventType, Period, PeriodKind,
 )
-from app.schedule import apply_plan, build_plan, split_events
+from app.api.schedule import apply_plan, build_plan, split_events
 
 
 def utc(*args) -> datetime:

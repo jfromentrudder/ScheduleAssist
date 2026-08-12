@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from app.auth import clear_session_cookie, get_current_user
+from app.api.auth import clear_session_cookie, get_current_user
 from app.database import get_db
 from app.models import Appearance, Theme, User
-from app.scheduler import (
+from app.core.scheduler import (
     MAX_HORIZON_DAYS, MAX_LUNCH_MINUTES, MAX_PERIOD_MINUTES, MIN_HORIZON_DAYS,
     MIN_LUNCH_MINUTES, MIN_PERIOD_MINUTES, WEEKDAYS, horizon_warning,
 )

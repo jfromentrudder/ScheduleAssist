@@ -9,7 +9,7 @@ API, and a CHECK constraint.
 import pytest
 
 from app.models import User
-from app.scheduler import (
+from app.core.scheduler import (
     MAX_LUNCH_MINUTES, MAX_PERIOD_MINUTES, MIN_LUNCH_MINUTES,
     MIN_PERIOD_MINUTES,
 )
@@ -228,7 +228,7 @@ def test_changing_timezone_moves_settled_periods_on_a_rebuild(
 # --- Preferences reach the generator ------------------------------------
 
 def test_the_generator_reads_the_saved_preferences(client, db_session):
-    from app.schedule import user_prefs
+    from app.api.schedule import user_prefs
 
     patch(client, workdays=[0, 2], day_start="08:00:00", day_end="12:00:00",
           period_minutes=30, timezone="America/Los_Angeles")

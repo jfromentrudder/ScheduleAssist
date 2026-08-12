@@ -19,12 +19,12 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session, selectinload
 from zoneinfo import ZoneInfo
 
-from app.auth import get_current_user
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import (
     Availability, Event, EventType, Period, PeriodKind, User,
 )
-from app.scheduler import (
+from app.core.scheduler import (
     BusyBlock,
     PeriodPlan,
     Prefs,

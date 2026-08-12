@@ -17,8 +17,8 @@ from app.models import (
     Calendar, CalendarConnection, CalendarKind, Event, EventSource, EventType,
     Period, PeriodKind,
 )
-from app.periods import clear_orphaned_periods
-from app.sync import clear_calendar
+from app.api.periods import clear_orphaned_periods
+from app.integrations.sync import clear_calendar
 
 
 def now() -> datetime:
@@ -249,7 +249,7 @@ def test_disconnecting_a_calendar_clears_its_periods(
 
     connection_id = calendar.calendar_connection_id
     # Revocation is a network call; the local removal is what is under test.
-    with patch("app.calendar_tokens.httpx.post"):
+    with patch("app.integrations.tokens.httpx.post"):
         response = client.delete(f"/api/calendars/{connection_id}")
 
     assert response.status_code == 204
@@ -267,7 +267,7 @@ def test_a_manual_period_survives_a_disconnect(
     db_session.add(_period(user, days_ahead=20, events=[mine]))
     db_session.commit()
 
-    with patch("app.calendar_tokens.httpx.post"):
+    with patch("app.integrations.tokens.httpx.post"):
         client.delete(f"/api/calendars/{calendar.calendar_connection_id}")
 
     assert db_session.query(Period).count() == 1

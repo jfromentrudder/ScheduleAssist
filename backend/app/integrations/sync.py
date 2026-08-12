@@ -13,13 +13,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import google_calendar
-from app.calendar_tokens import CalendarReauthRequired, get_access_token
-from app.inference import classify
+from app.integrations import google_calendar
+from app.integrations.tokens import CalendarReauthRequired, get_access_token
+from app.core.inference import classify
 from app.models import (
     Availability, Calendar, CalendarConnection, Event, EventSource, EventType,
 )
-from app.periods import clear_orphaned_periods
+from app.api.periods import clear_orphaned_periods
 
 # How much of the calendar an import covers. Wide enough to hold next term's
 # deadlines, bounded so a decade-old calendar is not dragged in wholesale.

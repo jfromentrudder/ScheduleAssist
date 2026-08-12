@@ -4,14 +4,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.account import router as account_router
-from app.auth import router as auth_router
-from app.calendars import router as calendars_router
+from app.api.account import router as account_router
+from app.api.auth import router as auth_router
+from app.api.calendars import router as calendars_router
 from app.config import settings
 from app.database import get_db
-from app.events import router as events_router
-from app.periods import router as periods_router
-from app.schedule import router as schedule_router
+from app.api.events import router as events_router
+from app.api.periods import router as periods_router
+from app.api.schedule import router as schedule_router
 
 # Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
 app = FastAPI(title="ScheduleAssist API")

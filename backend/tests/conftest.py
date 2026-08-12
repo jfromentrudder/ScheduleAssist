@@ -21,7 +21,7 @@ from sqlalchemy.pool import StaticPool
 os.environ.setdefault("CALENDAR_TOKEN_KEY",
                       "zH8Nn0kqOQZ3vJ6yQm1sVYd2lXrPfKcTgWbEuAiNjRk=")
 
-from app.auth import SESSION_COOKIE, create_session  # noqa: E402
+from app.api.auth import SESSION_COOKIE, create_session  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import User  # noqa: E402

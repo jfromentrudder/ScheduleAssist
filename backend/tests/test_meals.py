@@ -10,7 +10,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
-from app.scheduler import (
+from app.core.scheduler import (
     MIN_MEAL_MINUTES,
     BusyBlock,
     Prefs,

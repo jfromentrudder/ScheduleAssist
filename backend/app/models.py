@@ -6,7 +6,7 @@ import enum
 
 from app.crypto import EncryptedString
 from app.database import Base  # noqa: F401
-from app.scheduler import (
+from app.core.scheduler import (
     DEFAULT_HORIZON_DAYS, DEFAULT_LUNCH_MINUTES, MAX_HORIZON_DAYS,
     MAX_LUNCH_MINUTES, MAX_PERIOD_MINUTES, MIN_HORIZON_DAYS,
     MIN_LUNCH_MINUTES, MIN_PERIOD_MINUTES,

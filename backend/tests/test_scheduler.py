@@ -8,7 +8,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
-from app.scheduler import (
+from app.core.scheduler import (
     BusyBlock,
     Prefs,
     Task,

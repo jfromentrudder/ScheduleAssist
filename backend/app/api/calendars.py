@@ -18,8 +18,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, oauth
-from app.calendar_tokens import (
+from app.api.auth import get_current_user, oauth
+from app.integrations.tokens import (
     GOOGLE_CALENDAR_SCOPE,
     CalendarReauthRequired,
     apply_token_response,
@@ -29,8 +29,8 @@ from app.calendar_tokens import (
 from app.config import settings
 from app.database import get_db
 from app.models import Calendar, CalendarConnection, CalendarKind, User
-from app.periods import clear_orphaned_periods
-from app.sync import clear_calendar, sync_calendar, sync_connection, sync_quietly
+from app.api.periods import clear_orphaned_periods
+from app.integrations.sync import clear_calendar, sync_calendar, sync_connection, sync_quietly
 
 router = APIRouter(prefix="/api/calendars", tags=["calendars"])
 

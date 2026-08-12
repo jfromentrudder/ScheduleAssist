@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 from authlib.integrations.starlette_client import OAuthError
 
-from app.auth import SESSION_COOKIE, SESSION_TTL, create_session
+from app.api.auth import SESSION_COOKIE, SESSION_TTL, create_session
 from app.models import AuthIdentity, User, UserSession
 
 
@@ -36,7 +36,7 @@ def token_response(**claims) -> dict:
 def callback(client):
     """Drive the sign-in callback with a canned token response."""
     def run(token=None, raises=None):
-        with patch("app.auth.oauth.google.authorize_access_token") as authorize:
+        with patch("app.api.auth.oauth.google.authorize_access_token") as authorize:
             if raises is not None:
                 authorize.side_effect = raises
             else:

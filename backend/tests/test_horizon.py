@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.scheduler import (
+from app.core.scheduler import (
     BusyBlock,
     PeriodPlan,
     Prefs,

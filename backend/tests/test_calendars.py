@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.calendar_tokens import GOOGLE_CALENDAR_SCOPE
+from app.integrations.tokens import GOOGLE_CALENDAR_SCOPE
 from app.models import (
     Calendar, CalendarConnection, CalendarKind, Event, EventSource, EventType,
     User,
@@ -43,9 +43,9 @@ def callback(client):
                 c.get("/api/calendars/google/connect", params={"kind": kind},
                       follow_redirects=False)
         with (
-            patch("app.calendars.oauth.google_calendar.authorize_access_token",
+            patch("app.api.calendars.oauth.google_calendar.authorize_access_token",
                   return_value=token or token_response()),
-            patch("app.calendars.sync_quietly") as imported,
+            patch("app.api.calendars.sync_quietly") as imported,
         ):
             response = client.get("/api/calendars/google/callback",
                                   follow_redirects=False)
@@ -107,7 +107,7 @@ def test_consent_without_the_calendar_scope_is_refused(callback, db_session):
 
 
 def test_denied_consent_sends_the_user_back_to_retry(client, db_session):
-    with patch("app.calendars.oauth.google_calendar.authorize_access_token",
+    with patch("app.api.calendars.oauth.google_calendar.authorize_access_token",
                side_effect=Exception("access_denied")):
         response = client.get("/api/calendars/google/callback",
                               follow_redirects=False)
@@ -224,7 +224,7 @@ def test_disconnecting_removes_the_connection(callback, client, db_session):
     callback()
     connection = db_session.query(CalendarConnection).one()
 
-    with patch("app.calendar_tokens.httpx.post") as revoke:
+    with patch("app.integrations.tokens.httpx.post") as revoke:
         response = client.delete(f"/api/calendars/{connection.id}")
 
     assert response.status_code == 204
@@ -250,7 +250,7 @@ def test_disconnecting_removes_imported_events(callback, client, db_session, use
     ))
     db_session.commit()
 
-    with patch("app.calendar_tokens.httpx.post"):
+    with patch("app.integrations.tokens.httpx.post"):
         client.delete(f"/api/calendars/{connection.id}")
 
     assert db_session.query(Event).count() == 0
@@ -264,7 +264,7 @@ def test_revocation_failure_still_removes_the_connection(
     connection = db_session.query(CalendarConnection).one()
 
     import httpx
-    with patch("app.calendar_tokens.httpx.post",
+    with patch("app.integrations.tokens.httpx.post",
                side_effect=httpx.ConnectError("network down")):
         response = client.delete(f"/api/calendars/{connection.id}")
 

@@ -7,7 +7,7 @@ read as work.
 
 import pytest
 
-from app.inference import classify, match_keyword
+from app.core.inference import classify, match_keyword
 from app.models import CalendarKind, EventType
 
 SCHOOL = CalendarKind.SCHOOL

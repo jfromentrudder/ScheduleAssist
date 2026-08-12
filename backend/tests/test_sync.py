@@ -12,11 +12,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.google_calendar import SyncTokenExpired
+from app.integrations.google_calendar import SyncTokenExpired
 from app.models import (
     Calendar, CalendarConnection, CalendarKind, Event, EventSource, EventType,
 )
-from app.sync import (
+from app.integrations.sync import (
     apply_events, clear_calendar, deadline_moment, discover_calendars,
     sync_calendar, sync_connection,
 )
@@ -94,7 +94,7 @@ def apply(db_session, calendar, payloads):
 # --- Discovering the calendars in an account ----------------------------
 
 def test_discovery_creates_a_row_per_calendar(db_session, connection):
-    with patch("app.google_calendar.fetch_calendar_list", return_value=[
+    with patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
         listing("owner@example.com", "Personal", primary=True),
         listing("work@group.calendar.google.com", "Work"),
         listing("cs406@group.calendar.google.com", "CS406"),
@@ -107,7 +107,7 @@ def test_discovery_creates_a_row_per_calendar(db_session, connection):
 
 
 def test_new_calendars_inherit_the_accounts_default_kind(db_session, connection):
-    with patch("app.google_calendar.fetch_calendar_list",
+    with patch("app.integrations.google_calendar.fetch_calendar_list",
                return_value=[listing("a", "A")]):
         calendars = discover_calendars(db_session, connection, "access")
 
@@ -116,7 +116,7 @@ def test_new_calendars_inherit_the_accounts_default_kind(db_session, connection)
 
 def test_googles_own_checkbox_seeds_selection(db_session, connection):
     """What the user already curates in Google is the sensible starting point."""
-    with patch("app.google_calendar.fetch_calendar_list", return_value=[
+    with patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
         listing("a", "Shown", selected=True),
         listing("b", "Hidden", selected=False),
     ]):
@@ -128,7 +128,7 @@ def test_googles_own_checkbox_seeds_selection(db_session, connection):
 
 
 def test_the_primary_calendar_is_always_selected(db_session, connection):
-    with patch("app.google_calendar.fetch_calendar_list", return_value=[
+    with patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
         listing("a", "Primary", primary=True, selected=False),
     ]):
         calendars = discover_calendars(db_session, connection, "access")
@@ -139,7 +139,7 @@ def test_rediscovery_updates_presentation_but_keeps_the_users_choices(
     db_session, connection
 ):
     """Renaming a calendar in Google must not silently re-tick it."""
-    with patch("app.google_calendar.fetch_calendar_list",
+    with patch("app.integrations.google_calendar.fetch_calendar_list",
                return_value=[listing("a", "Old name")]):
         discover_calendars(db_session, connection, "access")
 
@@ -148,7 +148,7 @@ def test_rediscovery_updates_presentation_but_keeps_the_users_choices(
     calendar.kind = CalendarKind.WORK
     db_session.commit()
 
-    with patch("app.google_calendar.fetch_calendar_list", return_value=[
+    with patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
         listing("a", "New name", backgroundColor="#009688"),
     ]):
         discover_calendars(db_session, connection, "access")
@@ -163,7 +163,7 @@ def test_rediscovery_updates_presentation_but_keeps_the_users_choices(
 
 def test_summary_override_wins_over_summary(db_session, connection):
     """It is the name the user gave the calendar themselves."""
-    with patch("app.google_calendar.fetch_calendar_list", return_value=[
+    with patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
         listing("a", "Shared roster", summaryOverride="My shifts"),
     ]):
         calendars = discover_calendars(db_session, connection, "access")
@@ -397,7 +397,7 @@ def test_an_unlocked_event_is_reclassified_on_resync(db_session, calendar):
 # --- Sync tokens, per calendar ------------------------------------------
 
 def test_first_sync_stores_the_token_on_the_calendar(db_session, calendar):
-    with patch("app.google_calendar.fetch_all",
+    with patch("app.integrations.google_calendar.fetch_all",
                return_value=([], "sync-token-1")) as fetch:
         result = sync_calendar(db_session, calendar, "access",
                                now=datetime.now(timezone.utc))
@@ -416,7 +416,7 @@ def test_a_later_sync_is_incremental(db_session, calendar):
     calendar.sync_token = "sync-token-1"
     db_session.commit()
 
-    with patch("app.google_calendar.fetch_all",
+    with patch("app.integrations.google_calendar.fetch_all",
                return_value=([], "sync-token-2")) as fetch:
         result = sync_calendar(db_session, calendar, "access",
                                now=datetime.now(timezone.utc))
@@ -431,7 +431,7 @@ def test_an_expired_token_falls_back_to_a_full_import(db_session, calendar):
     calendar.sync_token = "stale"
     db_session.commit()
 
-    with patch("app.google_calendar.fetch_all",
+    with patch("app.integrations.google_calendar.fetch_all",
                side_effect=[SyncTokenExpired(), ([], "fresh")]) as fetch:
         result = sync_calendar(db_session, calendar, "access",
                                now=datetime.now(timezone.utc))
@@ -446,9 +446,9 @@ def test_an_expired_token_falls_back_to_a_full_import(db_session, calendar):
 
 def _account_sync(db_session, connection, listings, events=()):
     with (
-        patch("app.sync.get_access_token", return_value="access"),
-        patch("app.google_calendar.fetch_calendar_list", return_value=listings),
-        patch("app.google_calendar.fetch_all",
+        patch("app.integrations.sync.get_access_token", return_value="access"),
+        patch("app.integrations.google_calendar.fetch_calendar_list", return_value=listings),
+        patch("app.integrations.google_calendar.fetch_all",
               return_value=(list(events), "tok")) as fetch,
     ):
         result = sync_connection(db_session, connection)
@@ -477,11 +477,11 @@ def test_every_selected_calendar_is_imported(db_session, connection):
 def test_one_failing_calendar_does_not_abandon_the_others(db_session, connection):
     """A single broken calendar should not cost the user every other import."""
     with (
-        patch("app.sync.get_access_token", return_value="access"),
-        patch("app.google_calendar.fetch_calendar_list", return_value=[
+        patch("app.integrations.sync.get_access_token", return_value="access"),
+        patch("app.integrations.google_calendar.fetch_calendar_list", return_value=[
             listing("bad", "Broken"), listing("good", "Fine"),
         ]),
-        patch("app.google_calendar.fetch_all", side_effect=[
+        patch("app.integrations.google_calendar.fetch_all", side_effect=[
             RuntimeError("boom"),
             ([timed("e1", "Thing", "2026-08-10T10:00:00Z",
                     "2026-08-10T11:00:00Z")], "tok"),
@@ -606,8 +606,8 @@ def test_ticking_a_calendar_imports_immediately(client, db_session,
     db_session.commit()
 
     with (
-        patch("app.calendars.get_access_token", return_value="access"),
-        patch("app.google_calendar.fetch_all", return_value=(
+        patch("app.api.calendars.get_access_token", return_value="access"),
+        patch("app.integrations.google_calendar.fetch_all", return_value=(
             [timed("e1", "Standup", "2026-08-10T09:00:00Z",
                    "2026-08-10T09:15:00Z")], "tok")),
     ):
@@ -628,8 +628,8 @@ def test_changing_kind_reclassifies_existing_events(client, db_session,
     assert db_session.query(Event).one().event_type == EventType.ONE_TIME
 
     with (
-        patch("app.calendars.get_access_token", return_value="access"),
-        patch("app.google_calendar.fetch_all",
+        patch("app.api.calendars.get_access_token", return_value="access"),
+        patch("app.integrations.google_calendar.fetch_all",
               return_value=([all_day("e1", "Essay 2 due", "2026-08-14")], "tok")),
     ):
         client.patch(f"/api/calendars/{connection.id}/calendars/{calendar.id}",
@@ -665,10 +665,10 @@ def test_resync_endpoint_reports_what_changed(client, db_session, connection):
         all_day("e2", "Essay due", "2026-08-14"),
     ]
     with (
-        patch("app.sync.get_access_token", return_value="access"),
-        patch("app.google_calendar.fetch_calendar_list",
+        patch("app.integrations.sync.get_access_token", return_value="access"),
+        patch("app.integrations.google_calendar.fetch_calendar_list",
               return_value=[listing("a", "Primary", primary=True)]),
-        patch("app.google_calendar.fetch_all", return_value=(payloads, "tok")),
+        patch("app.integrations.google_calendar.fetch_all", return_value=(payloads, "tok")),
     ):
         response = client.post(f"/api/calendars/{connection.id}/sync")
 
@@ -680,9 +680,9 @@ def test_resync_endpoint_reports_what_changed(client, db_session, connection):
 
 
 def test_resync_reports_a_dead_connection(client, db_session, connection):
-    from app.calendar_tokens import CalendarReauthRequired
+    from app.integrations.tokens import CalendarReauthRequired
 
-    with patch("app.sync.get_access_token",
+    with patch("app.integrations.sync.get_access_token",
                side_effect=CalendarReauthRequired(connection.id, "revoked")):
         response = client.post(f"/api/calendars/{connection.id}/sync")
 
@@ -705,9 +705,9 @@ def test_resync_requires_ownership(client, db_session, connection):
 
 def test_a_failed_first_import_is_recorded_not_raised(db_session, connection):
     """Connecting succeeded; only the import failed, so it must not error out."""
-    from app.sync import sync_quietly
+    from app.integrations.sync import sync_quietly
 
-    with patch("app.sync.get_access_token", side_effect=RuntimeError("boom")):
+    with patch("app.integrations.sync.get_access_token", side_effect=RuntimeError("boom")):
         sync_quietly(db_session, connection)
 
     assert "boom" in connection.last_sync_error
