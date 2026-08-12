@@ -6,6 +6,7 @@ import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './auth/RequireAuth'
 import { Account } from './pages/Account'
 import { Schedule } from './pages/Schedule'
+import { Settings } from './pages/Settings'
 import { SignIn } from './pages/SignIn'
 import { ThemeProvider } from './theme/ThemeProvider'
 
@@ -20,6 +21,7 @@ function App() {
               <Route element={<Layout />}>
                 <Route path="/" element={<Schedule />} />
                 <Route path="/account" element={<Account />} />
+                <Route path="/settings" element={<Settings />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

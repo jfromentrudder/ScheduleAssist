@@ -10,6 +10,7 @@ from app.calendars import router as calendars_router
 from app.config import settings
 from app.database import get_db
 from app.events import router as events_router
+from app.periods import router as periods_router
 from app.schedule import router as schedule_router
 
 # Schema is managed by Alembic: run `alembic upgrade head` to apply migrations.
@@ -23,6 +24,7 @@ app.include_router(auth_router)
 app.include_router(account_router)
 app.include_router(calendars_router)
 app.include_router(events_router)
+app.include_router(periods_router)
 app.include_router(schedule_router)
 
 app.add_middleware(

@@ -26,9 +26,18 @@ type Props = {
   now: Date
   /** Opens an event's detail. Periods are generated, so they are not editable. */
   onSelectEvent?: (eventId: number) => void
+  /** Removes a generated block. `settled` is passed through so the caller can
+   *  warn before touching something inside the horizon. */
+  onDeletePeriod?: (periodId: number, settled: boolean) => void
 }
 
-export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
+export function WeekView({
+  schedule,
+  weekStart,
+  now,
+  onSelectEvent,
+  onDeletePeriod,
+}: Props) {
   const { events, periods, preferences } = schedule
   const timeZone = preferences.timezone
 
@@ -189,15 +198,53 @@ export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
                   </>
                 )
 
-                // Only events open a detail panel; periods are generated
-                // output, so there is nothing on them to edit.
-                return block.eventId && onSelectEvent ? (
+                const open =
+                  block.eventId !== undefined && onSelectEvent
+                    ? () => onSelectEvent(block.eventId!)
+                    : null
+                const remove =
+                  block.periodId !== undefined && onDeletePeriod
+                    ? () => onDeletePeriod(block.periodId!, block.locked ?? false)
+                    : null
+
+                // A deletable block holds its own button, so it cannot be one
+                // itself: nested interactive elements are invalid markup and
+                // unreachable by keyboard. Periods therefore render as a
+                // container, and only events become a single large target.
+                if (remove) {
+                  return (
+                    <article key={block.key} className={classes} style={style}>
+                      {open ? (
+                        <button
+                          type="button"
+                          className="block-open"
+                          onClick={open}
+                        >
+                          {inner}
+                        </button>
+                      ) : (
+                        inner
+                      )}
+                      <button
+                        type="button"
+                        className="block-delete"
+                        aria-label={`Delete ${block.title}`}
+                        title="Delete this period"
+                        onClick={remove}
+                      >
+                        ×
+                      </button>
+                    </article>
+                  )
+                }
+
+                return open ? (
                   <button
                     key={block.key}
                     type="button"
                     className={classes}
                     style={style}
-                    onClick={() => onSelectEvent(block.eventId!)}
+                    onClick={open}
                   >
                     {inner}
                   </button>

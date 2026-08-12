@@ -17,21 +17,41 @@
  *   imp|man|per (+ -bg)      the three event categories
  *   due                      deadlines
  *   danger (+ -bg)           destructive actions
+ *
+ * Light mode has no white in it. Every ground is tinted toward its own theme's
+ * neutral family and sits a few percent below white, because a full-bleed
+ * #ffffff calendar is both glaring and characterless — the theme only showed up
+ * in the blocks, so five of the six looked identical until something was on the
+ * schedule. The tint is deliberately low-chroma: separation between the page
+ * and the category colours comes from *saturation* distance, so grounds stay
+ * near-grey and the washes carry the colour.
+ *
+ * The ramp is ground -> surface -> off, each step deeper, except in Daylight
+ * where surface rises above a warmer ground instead. Anything reading `--ground`
+ * as paper (modals, the menu, block outlines) follows automatically.
+ *
+ * Every light-mode text pair clears WCAG AA (4.5:1) against the harder of its
+ * two backgrounds; the tightest is 4.55:1. Darkening the grounds raised most of
+ * those ratios, which is what allowed `--ink-3` — previously 2.4–3.6:1 in every
+ * theme — to come up to standard without flattening the ink hierarchy.
  */
 
 /* ============================================================ EMBER (default)
    Cool slate everywhere, with amber as the only warm colour in the system —
    reserved for what the app generates. */
 [data-theme='ember'][data-mode='light'] {
-  --ground: #ffffff; --surface: #f8fafc; --off: #f1f5f9;
-  --line: #e2e8f0; --line-soft: #eef2f7;
-  --ink: #0f172a; --ink-2: #64748b; --ink-3: #94a3b8;
-  --accent: #b45309; --accent-bg: rgb(180 83 9 / 0.10); --today: #fdf6ec;
-  --imp: #2563eb; --imp-bg: rgb(37 99 235 / 0.11);
-  --man: #475569; --man-bg: rgb(71 85 105 / 0.12);
-  --per: #b45309; --per-bg: rgb(180 83 9 / 0.10);
-  --due: #be123c;
-  --danger: #be123c; --danger-bg: rgb(190 18 60 / 0.10);
+  /* Tinted toward the slate neutrals rather than warmed. Amber is the only
+     warm colour in this theme and it is reserved for generated periods, so a
+     warm ground would be competing with the one thing meant to stand out. */
+  --ground: #f4f7fb; --surface: #eaf0f8; --off: #e2eaf4;
+  --line: #cfdae9; --line-soft: #dfe7f2;
+  --ink: #0d1526; --ink-2: #4f5e75; --ink-3: #606c7e;
+  --accent: #a44a06; --accent-bg: rgb(164 74 6 / 0.12); --today: #fbeedb;
+  --imp: #1b57ce; --imp-bg: rgb(27 87 206 / 0.13);
+  --man: #3f4e66; --man-bg: rgb(63 78 102 / 0.14);
+  --per: #a44a06; --per-bg: rgb(164 74 6 / 0.13);
+  --due: #b30f36;
+  --danger: #b30f36; --danger-bg: rgb(179 15 54 / 0.11);
 }
 [data-theme='ember'][data-mode='dark'] {
   --ground: #0b1120; --surface: #121b2c; --off: #101827;
@@ -48,15 +68,17 @@
 /* ===================================================================== TIDE
    Teal-biased neutrals, airy and low contrast. */
 [data-theme='tide'][data-mode='light'] {
-  --ground: #ffffff; --surface: #f6fafa; --off: #f0f5f5;
-  --line: #dce8e8; --line-soft: #eaf1f1;
-  --ink: #10201f; --ink-2: #566a6b; --ink-3: #859798;
-  --accent: #0f766e; --accent-bg: rgb(15 118 110 / 0.10); --today: #eefaf7;
-  --imp: #3e6b94; --imp-bg: rgb(62 107 148 / 0.13);
-  --man: #a35a12; --man-bg: rgb(163 90 18 / 0.13);
-  --per: #0f766e; --per-bg: rgb(15 118 110 / 0.09);
-  --due: #be123c;
-  --danger: #be123c; --danger-bg: rgb(190 18 60 / 0.10);
+  /* The most openly tinted of the six: teal is this theme's whole character,
+     and low contrast is the point, so the ground carries it directly. */
+  --ground: #f1f7f6; --surface: #e5f0ef; --off: #dcebe9;
+  --line: #c8dcda; --line-soft: #dae9e7;
+  --ink: #0d1e1d; --ink-2: #4a5e5f; --ink-3: #5e6d6e;
+  --accent: #0b6a62; --accent-bg: rgb(11 106 98 / 0.12); --today: #d9f2ec;
+  --imp: #345d84; --imp-bg: rgb(52 93 132 / 0.14);
+  --man: #8f4c0e; --man-bg: rgb(143 76 14 / 0.14);
+  --per: #0b6a62; --per-bg: rgb(11 106 98 / 0.12);
+  --due: #b3123a;
+  --danger: #b3123a; --danger-bg: rgb(179 18 58 / 0.11);
 }
 [data-theme='tide'][data-mode='dark'] {
   --ground: #101a1a; --surface: #162222; --off: #142020;
@@ -73,15 +95,17 @@
 /* ================================================================= MERIDIAN
    Saturated, high-legibility hues on a cool neutral ground. */
 [data-theme='meridian'][data-mode='light'] {
-  --ground: #ffffff; --surface: #f9fafb; --off: #f2f4f7;
-  --line: #e4e7ec; --line-soft: #f0f2f5;
-  --ink: #101828; --ink-2: #475467; --ink-3: #7d8798;
-  --accent: #1a56db; --accent-bg: rgb(26 86 219 / 0.10); --today: #eff4ff;
-  --imp: #1a56db; --imp-bg: rgb(26 86 219 / 0.12);
-  --man: #b54708; --man-bg: rgb(181 71 8 / 0.12);
-  --per: #036672; --per-bg: rgb(3 102 114 / 0.12);
-  --due: #b42318;
-  --danger: #b42318; --danger-bg: rgb(180 35 24 / 0.10);
+  /* Indigo-leaning ground so the saturated hues have something to sit against;
+     kept the lightest of the six, since high contrast is this theme's job. */
+  --ground: #f4f6fc; --surface: #e9eef8; --off: #e0e7f4;
+  --line: #cdd7ea; --line-soft: #dee5f3;
+  --ink: #0c1425; --ink-2: #3d4b62; --ink-3: #606b82;
+  --accent: #1348c9; --accent-bg: rgb(19 72 201 / 0.12); --today: #dfe8ff;
+  --imp: #1348c9; --imp-bg: rgb(19 72 201 / 0.14);
+  --man: #9c3c05; --man-bg: rgb(156 60 5 / 0.14);
+  --per: #025c68; --per-bg: rgb(2 92 104 / 0.14);
+  --due: #a01d13;
+  --danger: #a01d13; --danger-bg: rgb(160 29 19 / 0.11);
 }
 [data-theme='meridian'][data-mode='dark'] {
   --ground: #0c111d; --surface: #141b2d; --off: #111827;
@@ -98,15 +122,15 @@
 /* ================================================================= GRAPHITE
    Blue-biased greys, one blue accent. The most conventional of the six. */
 [data-theme='graphite'][data-mode='light'] {
-  --ground: #ffffff; --surface: #f8f9fb; --off: #f4f6f8;
-  --line: #e2e6ec; --line-soft: #eef1f5;
-  --ink: #14171c; --ink-2: #5c6573; --ink-3: #8a93a1;
-  --accent: #2563eb; --accent-bg: rgb(37 99 235 / 0.10); --today: #eef4ff;
-  --imp: #2563eb; --imp-bg: rgb(37 99 235 / 0.11);
-  --man: #0f766e; --man-bg: rgb(15 118 110 / 0.11);
-  --per: #64748b; --per-bg: rgb(100 116 139 / 0.10);
-  --due: #dc2626;
-  --danger: #dc2626; --danger-bg: rgb(220 38 38 / 0.10);
+  --ground: #f3f6fa; --surface: #e8edf5; --off: #e1e7f0;
+  --line: #ccd5e2; --line-soft: #dde4ee;
+  --ink: #111520; --ink-2: #4b5563; --ink-3: #636a77;
+  --accent: #1c58d9; --accent-bg: rgb(28 88 217 / 0.12); --today: #e0e9ff;
+  --imp: #1c58d9; --imp-bg: rgb(28 88 217 / 0.13);
+  --man: #0b6660; --man-bg: rgb(11 102 96 / 0.13);
+  --per: #54637a; --per-bg: rgb(84 99 122 / 0.13);
+  --due: #c41d1d;
+  --danger: #c41d1d; --danger-bg: rgb(196 29 29 / 0.11);
 }
 [data-theme='graphite'][data-mode='dark'] {
   --ground: #14161a; --surface: #1a1d23; --off: #191c21;
@@ -123,15 +147,19 @@
 /* ================================================================= DAYLIGHT
    Warm greys and a moss accent. The least clinical of the six. */
 [data-theme='daylight'][data-mode='light'] {
-  --ground: #fdfcfa; --surface: #ffffff; --off: #f5f3ef;
-  --line: #e7e3dc; --line-soft: #f0ede7;
-  --ink: #221f1a; --ink-2: #6b6459; --ink-3: #948c7f;
-  --accent: #4e7a58; --accent-bg: rgb(78 122 88 / 0.12); --today: #eef3ec;
-  --imp: #45688c; --imp-bg: rgb(69 104 140 / 0.12);
-  --man: #a86a2e; --man-bg: rgb(168 106 46 / 0.13);
-  --per: #4e7a58; --per-bg: rgb(78 122 88 / 0.13);
-  --due: #b5443a;
-  --danger: #b5443a; --danger-bg: rgb(181 68 58 / 0.11);
+  /* The one theme that raises its surface above the ground rather than below:
+     warm paper for the page, near-white for the bars sitting on it. Its ground
+     is therefore the *harder* background for text, which is what sets the ink
+     values here. */
+  --ground: #faf6ef; --surface: #fcf9f2; --off: #efe9de;
+  --line: #ded7c9; --line-soft: #ebe5d9;
+  --ink: #1f1c17; --ink-2: #5f584c; --ink-3: #6f6859;
+  --accent: #416a49; --accent-bg: rgb(65 106 73 / 0.13); --today: #e6efe3;
+  --imp: #3a5c81; --imp-bg: rgb(58 92 129 / 0.13);
+  --man: #8e561e; --man-bg: rgb(142 86 30 / 0.14);
+  --per: #436c4c; --per-bg: rgb(67 108 76 / 0.14);
+  --due: #a63a30;
+  --danger: #a63a30; --danger-bg: rgb(166 58 48 / 0.12);
 }
 [data-theme='daylight'][data-mode='dark'] {
   --ground: #1a1917; --surface: #211f1d; --off: #201e1b;
@@ -148,15 +176,21 @@
 /* =================================================================== SIGNAL
    Near-monochrome. Only the generated period carries a saturated hue. */
 [data-theme='signal'][data-mode='light'] {
-  --ground: #ffffff; --surface: #fbfbfc; --off: #f6f6f7;
-  --line: #e4e4e7; --line-soft: #efeff1;
-  --ink: #0b0b0d; --ink-2: #6d6d76; --ink-3: #96969e;
-  --accent: #0d9f6e; --accent-bg: rgb(13 159 110 / 0.11); --today: #f3f4f6;
-  --imp: #71717a; --imp-bg: rgb(113 113 122 / 0.13);
-  --man: #0b0b0d; --man-bg: rgb(11 11 13 / 0.09);
-  --per: #0d9f6e; --per-bg: rgb(13 159 110 / 0.13);
-  --due: #dc2f36;
-  --danger: #dc2f36; --danger-bg: rgb(220 47 54 / 0.10);
+  /* Near-monochrome is the brief, so this one gets the faintest tint of the six
+     — a hair off neutral, no more. The emerald is deepened rather than
+     brightened: it was the least legible colour in the whole system at 2.95:1
+     on white, which for the theme's one carrier of hue is the wrong place to
+     lose. `today` takes a trace of that same green, because a neutral tint was
+     indistinguishable from the non-workday shading beside it. */
+  --ground: #f6f6f5; --surface: #eeeeed; --off: #e7e7e6;
+  --line: #d8d8d6; --line-soft: #e5e5e3;
+  --ink: #0a0a0b; --ink-2: #5f5f67; --ink-3: #6a6a71;
+  --accent: #07704d; --accent-bg: rgb(7 112 77 / 0.12); --today: #e6efe9;
+  --imp: #63636c; --imp-bg: rgb(99 99 108 / 0.14);
+  --man: #0a0a0b; --man-bg: rgb(10 10 11 / 0.10);
+  --per: #07704d; --per-bg: rgb(7 112 77 / 0.14);
+  --due: #c4262d;
+  --danger: #b92128; --danger-bg: rgb(185 33 40 / 0.11);
 }
 [data-theme='signal'][data-mode='dark'] {
   --ground: #0d0d0f; --surface: #141417; --off: #121215;

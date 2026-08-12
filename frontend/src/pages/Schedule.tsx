@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { EventEditor } from '../events/EventEditor'
+import { ConfirmDialog } from '../schedule/ConfirmDialog'
+import { GenerateDialog } from '../schedule/GenerateDialog'
 import { ResolveDialog } from '../schedule/ResolveDialog'
 import { WeekView } from '../schedule/WeekView'
 import { generateSchedule } from '../schedule/generate'
 import type { GenerateRequest, NeedsDecision } from '../schedule/generate'
+import { SettledPeriod, deletePeriod } from '../schedule/periods'
 import type {
   Schedule as ScheduleData,
   ScheduleEvent,
@@ -44,6 +47,14 @@ const LEGEND: Record<ScheduleView, { kind: string; label: string }[]> = {
 /** Open editor state: an existing event, or `true` while creating a new one. */
 type Editing = ScheduleEvent | true | null
 
+/** A settled period the user has asked to delete, with the server's reason. */
+type PendingDelete = { periodId: number; message: string }
+
+const SETTLED_FALLBACK =
+  'That period is settled — it sits inside your planning horizon. Deleting it ' +
+  'frees the time, but the work it was holding will be scheduled again the ' +
+  'next time you generate.'
+
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -70,6 +81,11 @@ export function Schedule() {
   const [notice, setNotice] = useState<string | null>(null)
   const [view, setView] = useState<ScheduleView>('generated')
   const [editing, setEditing] = useState<Editing>(null)
+  // Open between clicking Generate and choosing what to do, so a misclick can
+  // be closed without anything having been written.
+  const [asking, setAsking] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000)
@@ -120,6 +136,7 @@ export function Schedule() {
     async (request: GenerateRequest = {}) => {
       setGenerating(true)
       setNotice(null)
+      setAsking(false)
       try {
         const result = await generateSchedule(request)
         if (result.committed) {
@@ -145,11 +162,58 @@ export function Schedule() {
   )
 
   /** Saving an event changes what the generator has to work with, so the
-   *  schedule is rebuilt straight away rather than waiting to be asked. */
+   *  schedule is rebuilt straight away rather than waiting to be asked.
+   *
+   *  No prompt here on purpose: this is automatic regeneration, which always
+   *  respects the freeze. Overriding it is something the user has to ask for. */
   const handleSaved = useCallback(async () => {
     setEditing(null)
     await runGenerate()
   }, [runGenerate])
+
+  /** Removes a generated block.
+   *
+   *  Deliberately does not regenerate afterwards. The user has just said they
+   *  do not want that block, and an automatic pass would put it straight back. */
+  const removePeriod = useCallback(
+    async (periodId: number, confirmed: boolean) => {
+      setRemoving(true)
+      setNotice(null)
+      try {
+        await deletePeriod(periodId, confirmed)
+        setPendingDelete(null)
+        await load(weekStart, view, timeZone)
+      } catch (failure) {
+        if (failure instanceof SettledPeriod) {
+          // Settled since this page loaded, or clicked from a stale view. The
+          // server decides, so its wording is what the user is shown.
+          setPendingDelete({ periodId, message: failure.message })
+        } else {
+          setNotice(
+            failure instanceof Error
+              ? failure.message
+              : 'Could not delete that period.',
+          )
+        }
+      } finally {
+        setRemoving(false)
+      }
+    },
+    [load, weekStart, view, timeZone],
+  )
+
+  const handleDeletePeriod = useCallback(
+    (periodId: number, settled: boolean) => {
+      // The feed already carries `locked`, so the warning appears without a
+      // round-trip; the 409 handled above is the backstop for a stale page.
+      if (settled) {
+        setPendingDelete({ periodId, message: SETTLED_FALLBACK })
+        return
+      }
+      void removePeriod(periodId, false)
+    },
+    [removePeriod],
+  )
 
   /** Opens an event's detail, fetching it when it is not on screen.
    *
@@ -219,7 +283,7 @@ export function Schedule() {
           {view === 'generated' && (
             <button
               className="button"
-              onClick={() => void runGenerate()}
+              onClick={() => setAsking(true)}
               disabled={generating || state.status !== 'ready'}
             >
               {generating ? 'Generating…' : 'Generate schedule'}
@@ -287,8 +351,29 @@ export function Schedule() {
             weekStart={weekStart}
             now={now}
             onSelectEvent={(id) => void openEvent(id)}
+            onDeletePeriod={handleDeletePeriod}
           />
         </>
+      )}
+
+      {asking && state.status === 'ready' && (
+        <GenerateDialog
+          horizonDays={state.data.preferences.schedule_horizon_days}
+          busy={generating}
+          onGenerate={(request) => void runGenerate(request)}
+          onClose={() => setAsking(false)}
+        />
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="This period is settled"
+          message={pendingDelete.message}
+          confirmLabel="Delete it anyway"
+          busy={removing}
+          onConfirm={() => void removePeriod(pendingDelete.periodId, true)}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
 
       {editing && (

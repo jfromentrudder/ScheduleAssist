@@ -29,6 +29,7 @@ from app.calendar_tokens import (
 from app.config import settings
 from app.database import get_db
 from app.models import Calendar, CalendarConnection, CalendarKind, User
+from app.periods import clear_orphaned_periods
 from app.sync import clear_calendar, sync_calendar, sync_connection, sync_quietly
 
 router = APIRouter(prefix="/api/calendars", tags=["calendars"])
@@ -87,14 +88,16 @@ def _connection_json(connection: CalendarConnection) -> dict:
     }
 
 
-def _redirect_to_account(error: str | None = None) -> RedirectResponse:
-    """Send the browser back to the account page, with an error to act on.
+def _redirect_to_settings(error: str | None = None) -> RedirectResponse:
+    """Send the browser back to the settings page, with an error to act on.
 
     Failures here are recoverable — the user declined, or unticked the calendar
-    permission — so the UI offers a retry rather than a dead end.
+    permission — so the UI offers a retry rather than a dead end. The target is
+    the page the calendar list lives on, so the outcome lands where the user
+    started the flow.
     """
     suffix = f"?calendar_error={error}" if error else "?calendar_connected=1"
-    return RedirectResponse(f"{settings.frontend_url}/account{suffix}")
+    return RedirectResponse(f"{settings.frontend_url}/settings{suffix}")
 
 
 @router.get("")
@@ -143,17 +146,17 @@ async def google_callback(
         token = await oauth.google_calendar.authorize_access_token(request)
     except Exception:
         # Denied consent, or a stale/replayed state parameter.
-        return _redirect_to_account("denied")
+        return _redirect_to_settings("denied")
 
     # The user can untick individual permissions on the consent screen, so a
     # successful handshake does not prove we got what we asked for.
     if GOOGLE_CALENDAR_SCOPE not in token.get("scope", "").split():
-        return _redirect_to_account("scope")
+        return _redirect_to_settings("scope")
 
     info = token.get("userinfo") or {}
     subject = info.get("sub")
     if not subject:
-        return _redirect_to_account("identity")
+        return _redirect_to_settings("identity")
 
     connection = db.scalar(
         select(CalendarConnection).where(
@@ -182,7 +185,7 @@ async def google_callback(
     # connection rather than raised, since the connection itself succeeded.
     sync_quietly(db, connection)
 
-    return _redirect_to_account()
+    return _redirect_to_settings()
 
 
 class ConnectionUpdate(BaseModel):
@@ -333,6 +336,10 @@ def delete_connection(
     """Revoke the grant at Google and remove the connection.
 
     Imported events cascade away with it — a decision already baked into the
-    schema, which #8 can revisit.
+    schema. The periods generated for those events do not cascade, because they
+    belong to the user rather than to the calendar, so they are cleared here:
+    time held for a deadline that has just been removed is time held for
+    nothing.
     """
     disconnect(db, _owned(connection_id, user, db))
+    clear_orphaned_periods(db, user.id)

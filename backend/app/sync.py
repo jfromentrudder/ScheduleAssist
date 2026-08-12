@@ -19,6 +19,7 @@ from app.inference import classify
 from app.models import (
     Availability, Calendar, CalendarConnection, Event, EventSource, EventType,
 )
+from app.periods import clear_orphaned_periods
 
 # How much of the calendar an import covers. Wide enough to hold next term's
 # deadlines, bounded so a decade-old calendar is not dragged in wholesale.
@@ -291,6 +292,11 @@ def sync_calendar(
     calendar.last_sync_error = None
     db.commit()
 
+    # An event cancelled at the provider leaves its periods behind, holding
+    # time for work that no longer exists.
+    if result.deleted:
+        clear_orphaned_periods(db, calendar.connection.user_id)
+
     return SyncResult(result.created, result.updated, result.deleted,
                       full_resync)
 
@@ -301,11 +307,17 @@ def clear_calendar(db: Session, calendar: Calendar) -> int:
     An unselected calendar must not keep blocking out work periods, so its
     events go rather than being hidden. Clearing the token means re-selecting
     it does a fresh full import.
+
+    Periods allocated for deadlines this calendar supplied go with them. This
+    is a bulk delete, so the ORM never sees the rows and only the database-level
+    cascade on `period_events` fires — which unlinks the periods without
+    removing them.
     """
     removed = db.query(Event).filter(Event.calendar_id == calendar.id).delete()
     calendar.sync_token = None
     calendar.last_synced_at = None
     db.commit()
+    clear_orphaned_periods(db, calendar.connection.user_id)
     return removed
 
 

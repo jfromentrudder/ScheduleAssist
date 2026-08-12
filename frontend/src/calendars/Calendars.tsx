@@ -1,7 +1,7 @@
 /** Connect and manage calendar accounts (issue #7).
  *
  * Connecting leaves the app entirely — the browser goes to Google's consent
- * screen and comes back to /account with a query flag — so this component
+ * screen and comes back to /settings with a query flag — so this component
  * reads that flag on mount rather than awaiting a promise. */
 
 import { useCallback, useEffect, useState } from 'react'

@@ -42,7 +42,7 @@ def test_a_trailing_slash_does_not_produce_a_double_slash(url):
 
 
 def test_frontend_url_is_normalized_too():
-    """It is concatenated with "/account" on the way back from consent."""
+    """It is concatenated with "/settings" on the way back from consent."""
     assert settings(frontend_url="http://localhost:5173/").frontend_url == (
         "http://localhost:5173")
 

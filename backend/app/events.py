@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Availability, Event, EventSource, EventType, User
+from app.periods import clear_orphaned_periods
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -215,11 +216,16 @@ def delete_event(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Remove an event the user created.
+    """Remove an event the user created, and any periods left serving nothing.
 
     Imported events are not deletable: the next sync would bring them straight
     back. Marking one as free, or unticking its calendar, is the way to get it
     out of the schedule.
+
+    Deleting a deadline clears the periods allocated for it. Those blocks only
+    ever meant "work toward this", so leaving them would hold time for work the
+    user has just said they no longer have. A period shared with another
+    deadline survives, because that other work still needs it.
     """
     event = _owned(event_id, user, db)
     if event.source == EventSource.IMPORTED:
@@ -230,3 +236,4 @@ def delete_event(
         )
     db.delete(event)
     db.commit()
+    clear_orphaned_periods(db, user.id)

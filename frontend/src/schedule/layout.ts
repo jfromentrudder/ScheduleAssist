@@ -30,9 +30,12 @@ export type Block = {
   laneCount: number
   /** Periods only: settled inside the horizon, so it will not be moved. */
   locked?: boolean
-  /** The event this block came from, for opening its detail. Absent on
-   *  periods, which are generated rather than edited. */
+  /** The event this block came from, for opening its detail. On a period this
+   *  is the deadline it was generated to serve, not the block itself. */
   eventId?: number
+  /** Set on generated blocks, which the user can delete. Its presence is what
+   *  distinguishes a period from an event of the same shape. */
+  periodId?: number
 }
 
 export type DeadlineMarker = {
@@ -153,6 +156,8 @@ export function buildDayBlocks(
         kind: 'meal',
         title: 'Meal break',
         subtitle: 'Kept clear',
+        locked: period.locked,
+        periodId: period.id,
       })
       continue
     }
@@ -167,6 +172,7 @@ export function buildDayBlocks(
       // Opens the deadline this block was generated to serve — settled or
       // not, the user still needs to see what they are working toward.
       eventId: period.events[0]?.id,
+      periodId: period.id,
     })
   }
 

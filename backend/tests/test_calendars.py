@@ -61,6 +61,9 @@ def test_callback_stores_the_connection(callback, db_session, user):
 
     assert response.status_code == 307
     assert "calendar_connected=1" in response.headers["location"]
+    # The calendar list lives on the settings page, so the outcome has to land
+    # there or the user never sees the message.
+    assert "/settings?" in response.headers["location"]
 
     connection = db_session.query(CalendarConnection).one()
     assert connection.user_id == user.id

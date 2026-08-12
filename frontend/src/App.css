@@ -105,6 +105,85 @@
   }
 }
 
+/* Everything about the account collapses in here, so the bar does not grow a
+   new link every time a settings page is added. */
+.menu {
+  position: relative;
+  display: flex;
+}
+
+.menu-button {
+  /* Wider than the square icon buttons in the schedule bar: this one holds
+     three bars rather than a single glyph. */
+  width: 32px;
+}
+
+.menu-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 15px;
+
+  i {
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentcolor;
+  }
+}
+
+.menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 15;
+  min-width: 168px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  /* The only elevation in the app: this floats over page content, so the edge
+     alone is not enough to separate it. */
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+
+  hr {
+    height: 1px;
+    margin: 5px 4px;
+    border: 0;
+    background: var(--line);
+  }
+}
+
+/* One rule for both the links and the sign-out button, so a menu of mixed
+   elements still reads as a single list. */
+.menu-panel .menu-item {
+  font: inherit;
+  font-size: 14.5px;
+  text-align: left;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  text-decoration: none;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--off);
+    color: var(--ink);
+  }
+  &.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
 main {
   flex-grow: 1;
   display: flex;
@@ -607,6 +686,15 @@ main {
   }
 }
 
+/* Title and a close button on one line. The close button matters: it is the
+   way out of a dialog opened by a misclick. */
+.modal-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .unmet-list {
   margin: 0;
   padding: 0;
@@ -775,6 +863,80 @@ button.block {
   background: var(--surface);
   border: 1px dashed var(--ink-3);
   color: var(--ink-2);
+}
+
+/* A period holds its own delete button, so the block itself cannot be one.
+   This fills it instead, and stays visually invisible: the block's colour and
+   edge are the affordance, exactly as before. */
+.block-open {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  /* Negative margin cancels the block's padding so the target reaches its
+     edges, then puts the padding back on the inside. */
+  margin: -4px -8px;
+  padding: 4px 8px;
+  /* Room for the delete button, so a long title never runs under it. */
+  padding-right: 22px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.04);
+  }
+}
+
+.block-delete {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  z-index: 2;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.55;
+
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+    background: var(--ground);
+  }
+}
+
+/* Kept out of the way until the block is under the pointer, so a full week of
+   periods is not covered in controls. Only where hovering exists: on touch
+   there is no hover state to reveal it, so it stays visible. */
+@media (hover: hover) {
+  .block-delete {
+    opacity: 0;
+  }
+
+  .block:hover .block-delete,
+  .block:focus-within .block-delete {
+    opacity: 0.55;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
+    }
+  }
 }
 
 .deadline {

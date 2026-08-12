@@ -1,14 +1,15 @@
+/** Who you are: the details of the account itself.
+ *
+ * Deliberately separate from Settings. Nothing here changes how the app
+ * behaves — it is identity and the one irreversible action — so it does not
+ * belong on the same page as a dozen controls people adjust casually. */
+
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
-import { Calendars } from '../calendars/Calendars'
-import { Scheduling } from '../settings/Scheduling'
-import type { SchedulingPrefs } from '../settings/Scheduling'
-import { APPEARANCES, THEMES } from '../theme/constants'
-import { useTheme } from '../theme/useTheme'
 
-type AccountDetails = SchedulingPrefs & {
+type Profile = {
   id: number
   email: string
   display_name: string | null
@@ -16,30 +17,13 @@ type AccountDetails = SchedulingPrefs & {
   providers: string[]
 }
 
-/** Live preview of a theme's category colours, rendered in the current mode. */
-function ThemeSwatches({ themeId }: { themeId: string }) {
-  const { mode } = useTheme()
-  return (
-    <span className="swatch-row" data-theme={themeId} data-mode={mode} aria-hidden="true">
-      <i style={{ background: 'var(--imp)' }} />
-      <i style={{ background: 'var(--man)' }} />
-      <i style={{ background: 'var(--per-bg)', border: '1px dashed var(--per)' }} />
-      <i style={{ background: 'var(--due)' }} />
-    </span>
-  )
-}
-
 export function Account() {
-  const { refresh, signOut } = useAuth()
-  const { theme, appearance, setTheme, setAppearance } = useTheme()
+  const { refresh } = useAuth()
   const navigate = useNavigate()
 
-  const [account, setAccount] = useState<AccountDetails | null>(null)
+  const [account, setAccount] = useState<Profile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [saving, setSaving] = useState(false)
-  // True once a preference changes that the current schedule was not built with.
-  const [stale, setStale] = useState(false)
 
   useEffect(() => {
     fetch('/api/account')
@@ -47,65 +31,6 @@ export function Account() {
       .then(setAccount)
       .catch(() => setError('Could not load your account details.'))
   }, [])
-
-  async function savePrefs(change: Partial<SchedulingPrefs>) {
-    // Optimistic: a slider must track the thumb, not the network. The response
-    // carries the authoritative values and any warning.
-    setAccount((current) => (current ? { ...current, ...change } : current))
-    setError(null)
-    setSaving(true)
-
-    const res = await fetch('/api/account', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(change),
-    })
-
-    if (res.ok) {
-      const saved = await res.json()
-      setAccount(saved)
-      // These preferences decide what a generated schedule looks like, so the
-      // existing one no longer reflects them.
-      if (saved.schedule_stale) setStale(true)
-    } else {
-      const detail = await res.json().catch(() => null)
-      setError(
-        typeof detail?.detail === 'string'
-          ? detail.detail
-          : 'Could not save that setting.',
-      )
-      // Roll the optimistic change back to whatever the server still holds.
-      const fresh = await fetch('/api/account')
-      if (fresh.ok) setAccount(await fresh.json())
-    }
-    setSaving(false)
-  }
-
-  async function regenerate() {
-    setSaving(true)
-    const res = await fetch('/api/schedule/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // A full rebuild, not the additive default. The periods that break the
-      // new settings are usually inside the horizon, and an additive pass
-      // protects exactly those — leaving the schedule visibly wrong.
-      body: JSON.stringify({ strategy: 'rebuild' }),
-    })
-    setSaving(false)
-    if (!res.ok) {
-      setError('Could not rebuild your schedule.')
-      return
-    }
-    setStale(false)
-    // A shortfall needs the choice dialog, which lives on the schedule page.
-    if (!(await res.json()).committed) navigate('/')
-  }
-
-  async function handleSignOut() {
-    setBusy(true)
-    await signOut()
-    navigate('/signin', { replace: true })
-  }
 
   async function handleDelete() {
     if (!confirm('Delete your account? This erases your data and cannot be undone.')) return
@@ -142,78 +67,19 @@ export function Account() {
             <dd>{new Date(account.created_at).toLocaleDateString()}</dd>
           </dl>
         )}
+        <p className="field-hint">
+          Your name and email come from the account you sign in with, so they
+          are changed there rather than here.
+        </p>
       </section>
 
       <section>
-        <h3>Appearance</h3>
-
-        <div className="field">
-          <label id="theme-label">Theme</label>
-          <div className="choices" role="group" aria-labelledby="theme-label">
-            {THEMES.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className="choice"
-                aria-pressed={theme === option.id}
-                onClick={() => setTheme(option.id)}
-              >
-                <ThemeSwatches themeId={option.id} />
-                {option.label}
-                <small>{option.hint}</small>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <label id="appearance-label">Light or dark</label>
-          <div className="choices" role="group" aria-labelledby="appearance-label">
-            {APPEARANCES.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className="choice"
-                aria-pressed={appearance === option.id}
-                onClick={() => setAppearance(option.id)}
-              >
-                {option.label}
-                {option.hint && <small>{option.hint}</small>}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <Calendars />
-
-      {account && (
-        <Scheduling prefs={account} onSave={savePrefs} busy={saving} />
-      )}
-
-      {stale && (
-        <div className="stale-banner" role="status">
-          <span>
-            Your schedule was built with the old settings. Rebuilding moves
-            every period to match them, including ones already settled inside
-            your horizon.
-          </span>
-          <button
-            className="button"
-            disabled={saving}
-            onClick={() => void regenerate()}
-          >
-            {saving ? 'Rebuilding…' : 'Rebuild schedule'}
-          </button>
-        </div>
-      )}
-
-      <section>
-        <h3>Session</h3>
+        <h3>Delete account</h3>
+        <p className="field-hint">
+          Removes your schedule, your events and every connected calendar. This
+          cannot be undone.
+        </p>
         <div className="actions">
-          <button className="button quiet" onClick={handleSignOut} disabled={busy}>
-            Sign out
-          </button>
           <button className="button danger" onClick={handleDelete} disabled={busy}>
             Delete account
           </button>
