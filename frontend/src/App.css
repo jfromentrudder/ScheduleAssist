@@ -340,6 +340,7 @@ main {
 .swatch.kind-manual { background: var(--man); }
 .swatch.kind-period { background: var(--per-bg); border: 1px dashed var(--per); }
 .swatch.kind-settled { background: var(--per-bg); border: 1px solid var(--per); }
+.swatch.kind-meal { background: var(--surface); border: 1px dashed var(--ink-3); }
 .swatch.kind-deadline { background: var(--due); }
 
 .schedule-status {
@@ -767,6 +768,15 @@ button.block {
   border-style: solid;
 }
 
+/* Also generated, so it keeps the dashed edge — but it is time held clear
+   rather than allocated, so it takes a neutral colour instead of the one
+   reserved for work. */
+.block.kind-meal {
+  background: var(--surface);
+  border: 1px dashed var(--ink-3);
+  color: var(--ink-2);
+}
+
 .deadline {
   position: absolute;
   inset-inline: 0;
@@ -794,6 +804,29 @@ button.block {
   /* The marker row ignores pointer events; its flag must not. */
   pointer-events: auto;
   cursor: pointer;
+}
+
+/* Sticks to the bottom so a preference changed at the top of a long settings
+   page still offers the rebuild that makes it take effect. */
+.stale-banner {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--ink-2);
+
+  span {
+    flex: 1;
+    min-width: 220px;
+  }
 }
 
 .view-switch {

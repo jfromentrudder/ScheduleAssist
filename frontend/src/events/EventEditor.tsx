@@ -33,6 +33,8 @@ const AVAILABILITY: {
 }[] = [
   { id: 'busy', label: 'Busy', hint: 'Work is scheduled around this' },
   { id: 'work_window', label: 'Time to work', hint: 'Work is scheduled inside it' },
+  // Blocks its time and replaces the break the generator would add that day.
+  { id: 'meal', label: 'Meal', hint: 'This is my break that day' },
   { id: 'free', label: 'Just a note', hint: 'Ignored when scheduling' },
 ]
 

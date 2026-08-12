@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.models import (
-    Availability, Event, EventSource, EventType, Period,
+    Availability, Event, EventSource, EventType, Period, PeriodKind,
 )
 from app.schedule import apply_plan, build_plan, shapes_the_day
 
@@ -409,4 +409,5 @@ def test_generating_after_creating_a_deadline_produces_periods(
     response = client.post("/api/schedule/generate", json={})
 
     assert response.json()["committed"] is True
-    assert db_session.query(Period).count() == 2
+    assert db_session.query(Period).filter(
+        Period.kind == PeriodKind.WORK).count() == 2

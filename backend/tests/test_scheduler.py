@@ -46,11 +46,38 @@ def test_empty_schedule_produces_no_periods(prefs):
 def test_slots_respect_workdays_and_working_hours(prefs):
     slots = available_slots(prefs, [], MONDAY, WEEK_END, now=MONDAY)
 
-    # Five workdays x eight hours, with the weekend excluded entirely.
-    assert len(slots) == 40
+    # Seven 60-minute periods fit in an eight-hour day once each is followed by
+    # a 10-minute buffer. The weekend is excluded entirely.
+    assert len(slots) == 35
     assert {start.weekday() for start, _ in slots} == {0, 1, 2, 3, 4}
     assert all(9 <= start.hour < 17 for start, _ in slots)
     assert slots[0] == (utc(2026, 8, 10, 9), utc(2026, 8, 10, 10))
+
+
+def test_consecutive_periods_are_separated_by_a_buffer(prefs):
+    """Back-to-back blocks look tidy and are unusable in practice."""
+    slots = available_slots(prefs, [], MONDAY, MONDAY + timedelta(days=1),
+                            now=MONDAY)
+
+    assert slots[0] == (utc(2026, 8, 10, 9), utc(2026, 8, 10, 10))
+    assert slots[1] == (utc(2026, 8, 10, 10, 10), utc(2026, 8, 10, 11, 10))
+    for earlier, later in zip(slots, slots[1:]):
+        assert later[0] - earlier[1] >= timedelta(minutes=10)
+
+
+def test_the_buffer_does_not_shorten_a_period(prefs):
+    """It is the stride between periods, not padding taken out of them."""
+    slots = available_slots(prefs, [], MONDAY, MONDAY + timedelta(days=1),
+                            now=MONDAY)
+    for start, end in slots:
+        assert end - start == timedelta(minutes=prefs.period_minutes)
+
+
+def test_no_buffer_is_wasted_at_the_end_of_a_run(prefs):
+    """The last period may finish flush against the end of the day."""
+    slots = available_slots(prefs, [], MONDAY, MONDAY + timedelta(days=1),
+                            now=MONDAY)
+    assert slots[-1][1] == utc(2026, 8, 10, 17)
 
 
 def test_periods_never_overlap_a_busy_block(prefs):
@@ -83,10 +110,8 @@ def test_overlapping_busy_blocks_are_merged(prefs):
     ]
     slots = available_slots(prefs, overlapping, MONDAY,
                             MONDAY + timedelta(days=1), now=MONDAY)
-    assert slots == [
-        (utc(2026, 8, 10, 15), utc(2026, 8, 10, 16)),
-        (utc(2026, 8, 10, 16), utc(2026, 8, 10, 17)),
-    ]
+    # Two hours are free, but a second period would need the buffer too.
+    assert slots == [(utc(2026, 8, 10, 15), utc(2026, 8, 10, 16))]
 
 
 def test_prep_is_rounded_up_to_whole_periods(prefs):
@@ -113,14 +138,15 @@ def test_periods_land_before_the_deadline(prefs):
 
 
 def test_earlier_deadline_wins_contested_slots(prefs):
-    # Both want Monday; only the urgent one can have it.
-    urgent = Task(event_id=2, due_at=utc(2026, 8, 10, 17), prep_minutes=480)
+    # Both want Monday, and 420 minutes is exactly the seven periods a buffered
+    # day holds — so only the urgent one can have it.
+    urgent = Task(event_id=2, due_at=utc(2026, 8, 10, 17), prep_minutes=420)
     relaxed = Task(event_id=1, due_at=utc(2026, 8, 14, 17), prep_minutes=60)
 
     plan = generate([relaxed, urgent], [], prefs, MONDAY, WEEK_END, now=MONDAY)
 
     monday = [p for p in plan.periods if p.starts_at.day == 10]
-    assert len(monday) == 8
+    assert len(monday) == 7
     assert all(p.event_ids == (2,) for p in monday)
     # The relaxed task is not starved, just pushed to Tuesday.
     assert [p for p in plan.periods if p.event_ids ==
@@ -132,10 +158,10 @@ def test_overloaded_day_reports_what_did_not_fit(prefs):
     task = Task(event_id=1, due_at=utc(2026, 8, 10, 17), prep_minutes=960)
     plan = generate([task], [], prefs, MONDAY, WEEK_END, now=MONDAY)
 
-    assert len(plan.periods) == 8
+    assert len(plan.periods) == 7
     assert len(plan.unmet) == 1
     assert plan.unmet[0].periods_needed == 16
-    assert plan.unmet[0].periods_allocated == 8
+    assert plan.unmet[0].periods_allocated == 7
     assert plan.unmet[0].reason == "no free time before deadline"
 
 

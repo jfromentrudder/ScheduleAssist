@@ -15,6 +15,7 @@ import {
   isSameDay,
   minutesSinceMidnight,
   parseClockTime,
+  toZoneClock,
 } from './week'
 
 const PX_PER_MINUTE = 0.9
@@ -28,23 +29,31 @@ type Props = {
 }
 
 export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
-  const days = useMemo(
-    () => Array.from({ length: DAYS_IN_WEEK }, (_, i) => addDays(weekStart, i)),
-    [weekStart],
-  )
-
   const { events, periods, preferences } = schedule
+  const timeZone = preferences.timezone
+
+  // Everything below positions blocks with ordinary local date methods, so
+  // instants are converted once here into the user's zone. These are display
+  // values only — `weekStart` and `now` stay real instants for their callers.
+  const days = useMemo(
+    () =>
+      Array.from({ length: DAYS_IN_WEEK }, (_, i) =>
+        addDays(toZoneClock(weekStart, timeZone), i),
+      ),
+    [weekStart, timeZone],
+  )
+  const zonedNow = useMemo(() => toZoneClock(now, timeZone), [now, timeZone])
 
   const perDay = useMemo(
     () =>
       days.map((day) => ({
         day,
-        blocks: buildDayBlocks(events, periods, day),
-        markers: buildDeadlineMarkers(events, day),
-        allDay: allDayEvents(events, day),
-        windows: buildWorkWindows(events, day),
+        blocks: buildDayBlocks(events, periods, day, timeZone),
+        markers: buildDeadlineMarkers(events, day, timeZone),
+        allDay: allDayEvents(events, day, timeZone),
+        windows: buildWorkWindows(events, day, timeZone),
       })),
-    [days, events, periods],
+    [days, events, periods, timeZone],
   )
 
   const bounds = useMemo(
@@ -71,14 +80,14 @@ export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
 
   const workdays = new Set(preferences.workdays)
   const hasAllDay = perDay.some((d) => d.allDay.length > 0)
-  const nowMinutes = minutesSinceMidnight(now)
+  const nowMinutes = minutesSinceMidnight(zonedNow)
   const nowVisible = nowMinutes >= bounds.startMin && nowMinutes <= bounds.endMin
 
   // The horizon always lands on a local midnight, so it separates whole day
   // columns rather than cutting through one. The calendar view has no periods
   // to settle, so it does not draw the rule at all.
   const horizonEnd = schedule.horizon_ends_at
-    ? new Date(schedule.horizon_ends_at)
+    ? toZoneClock(new Date(schedule.horizon_ends_at), timeZone)
     : null
   const isSettled = (day: Date) => horizonEnd !== null && day < horizonEnd
   // Mark the first open day only when a settled one precedes it, so the rule
@@ -92,7 +101,7 @@ export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
       <div className="week-head">
         <div className="week-gutter" aria-hidden="true" />
         {days.map((day, i) => {
-          const isToday = isSameDay(day, now)
+          const isToday = isSameDay(day, zonedNow)
           const isWorkday = workdays.has((day.getDay() + 6) % 7)
           return (
             <div
@@ -136,7 +145,7 @@ export function WeekView({ schedule, weekStart, now, onSelectEvent }: Props) {
         </div>
 
         {perDay.map(({ day, blocks, markers, windows }, i) => {
-          const isToday = isSameDay(day, now)
+          const isToday = isSameDay(day, zonedNow)
           const isWorkday = workdays.has((day.getDay() + 6) % 7)
           return (
             <div

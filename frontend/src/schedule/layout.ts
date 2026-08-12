@@ -4,7 +4,15 @@
  * reason about and to test (#16). */
 
 import type { BlockKind, ScheduleEvent, SchedulePeriod } from './types'
-import { addDays, minutesSinceMidnight } from './week'
+import { addDays, minutesSinceMidnight, toZoneClock } from './week'
+
+/** An API timestamp as a zone-clock Date, ready for local date arithmetic.
+ *
+ * Every instant entering this module goes through here, so the positioning
+ * below can stay plain and still render the user's timezone. */
+function zoned(iso: string, timeZone: string): Date {
+  return toZoneClock(new Date(iso), timeZone)
+}
 
 /** Very short blocks still need to be readable and clickable. */
 export const MIN_BLOCK_MINUTES = 24
@@ -108,6 +116,7 @@ export function buildDayBlocks(
   events: ScheduleEvent[],
   periods: SchedulePeriod[],
   day: Date,
+  timeZone: string,
 ): Block[] {
   const raw: (Placed & Omit<Block, 'lane' | 'laneCount'>)[] = []
 
@@ -118,7 +127,8 @@ export function buildDayBlocks(
     if (event.availability === 'work_window') continue
     if (!event.starts_at || !event.ends_at) continue
 
-    const span = clampToDay(new Date(event.starts_at), new Date(event.ends_at), day)
+    const span = clampToDay(zoned(event.starts_at, timeZone),
+                            zoned(event.ends_at, timeZone), day)
     if (!span) continue
 
     raw.push({
@@ -132,8 +142,20 @@ export function buildDayBlocks(
   }
 
   for (const period of periods) {
-    const span = clampToDay(new Date(period.starts_at), new Date(period.ends_at), day)
+    const span = clampToDay(zoned(period.starts_at, timeZone),
+                            zoned(period.ends_at, timeZone), day)
     if (!span) continue
+
+    if (period.kind === 'meal') {
+      raw.push({
+        ...span,
+        key: `period-${period.id}`,
+        kind: 'meal',
+        title: 'Meal break',
+        subtitle: 'Kept clear',
+      })
+      continue
+    }
 
     raw.push({
       ...span,
@@ -142,6 +164,9 @@ export function buildDayBlocks(
       title: period.events.map((e) => e.title).join(', ') || 'Work period',
       subtitle: period.locked ? 'Settled' : 'Work period',
       locked: period.locked,
+      // Opens the deadline this block was generated to serve — settled or
+      // not, the user still needs to see what they are working toward.
+      eventId: period.events[0]?.id,
     })
   }
 
@@ -158,6 +183,7 @@ export function buildDayBlocks(
 export function buildDeadlineMarkers(
   events: ScheduleEvent[],
   day: Date,
+  timeZone: string,
 ): DeadlineMarker[] {
   const dayStart = new Date(day)
   dayStart.setHours(0, 0, 0, 0)
@@ -166,13 +192,13 @@ export function buildDeadlineMarkers(
   return events
     .filter((event): event is ScheduleEvent & { due_at: string } => {
       if (event.event_type !== 'deadline' || !event.due_at) return false
-      const due = new Date(event.due_at)
+      const due = zoned(event.due_at, timeZone)
       return due >= dayStart && due < dayEnd
     })
     .map((event) => ({
       key: `deadline-${event.id}`,
       title: event.title,
-      atMin: minutesSinceMidnight(new Date(event.due_at)),
+      atMin: minutesSinceMidnight(zoned(event.due_at, timeZone)),
       source: event.source as 'imported' | 'manual',
       eventId: event.id,
     }))
@@ -183,6 +209,7 @@ export function buildDeadlineMarkers(
 export function buildWorkWindows(
   events: ScheduleEvent[],
   day: Date,
+  timeZone: string,
 ): WorkWindow[] {
   const windows: WorkWindow[] = []
 
@@ -190,7 +217,8 @@ export function buildWorkWindows(
     if (event.availability !== 'work_window') continue
     if (!event.starts_at || !event.ends_at) continue
 
-    const span = clampToDay(new Date(event.starts_at), new Date(event.ends_at), day)
+    const span = clampToDay(zoned(event.starts_at, timeZone),
+                            zoned(event.ends_at, timeZone), day)
     if (!span) continue
 
     windows.push({
@@ -204,14 +232,21 @@ export function buildWorkWindows(
   return windows.sort((a, b) => a.startMin - b.startMin)
 }
 
-export function allDayEvents(events: ScheduleEvent[], day: Date): ScheduleEvent[] {
+export function allDayEvents(
+  events: ScheduleEvent[],
+  day: Date,
+  timeZone: string,
+): ScheduleEvent[] {
   const dayStart = new Date(day)
   dayStart.setHours(0, 0, 0, 0)
   const dayEnd = addDays(dayStart, 1)
 
   return events.filter((event) => {
     if (!event.is_all_day || !event.starts_at || !event.ends_at) return false
-    return new Date(event.starts_at) < dayEnd && new Date(event.ends_at) > dayStart
+    return (
+      zoned(event.starts_at, timeZone) < dayEnd &&
+      zoned(event.ends_at, timeZone) > dayStart
+    )
   })
 }
 

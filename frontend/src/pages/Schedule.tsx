@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { EventEditor } from '../events/EventEditor'
 import { ResolveDialog } from '../schedule/ResolveDialog'
@@ -10,7 +10,13 @@ import type {
   ScheduleEvent,
   ScheduleView,
 } from '../schedule/types'
-import { DAYS_IN_WEEK, addDays, formatWeekRange, startOfWeek } from '../schedule/week'
+import { useAuth } from '../auth/useAuth'
+import {
+  addWeeksIn,
+  formatWeekRange,
+  startOfWeekIn,
+  toZoneClock,
+} from '../schedule/week'
 
 const VIEWS: { id: ScheduleView; label: string; hint: string }[] = [
   { id: 'generated', label: 'Schedule', hint: 'The periods ScheduleAssist built for you' },
@@ -23,6 +29,7 @@ const LEGEND: Record<ScheduleView, { kind: string; label: string }[]> = {
   generated: [
     { kind: 'period', label: 'Work period' },
     { kind: 'settled', label: 'Settled' },
+    { kind: 'meal', label: 'Meal break' },
     { kind: 'deadline', label: 'Deadline' },
     { kind: 'imported', label: 'Commitment' },
     { kind: 'manual', label: 'Added by you' },
@@ -43,7 +50,16 @@ type LoadState =
   | { status: 'ready'; data: ScheduleData }
 
 export function Schedule() {
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  // The week shown is the user's week, which is not the browser's when the two
+  // are in different zones. Their timezone arrives with /api/auth/me, so it is
+  // known before the first fetch.
+  const { user } = useAuth()
+  const timeZone =
+    user?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  // Held as an offset rather than a date: the timezone arrives after the first
+  // render, and a stored date would be stuck in whatever zone was guessed then.
+  const [weekOffset, setWeekOffset] = useState(0)
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   // Updated periodically so the "current time" line stays accurate.
   const [now, setNow] = useState(() => new Date())
@@ -60,30 +76,45 @@ export function Schedule() {
     return () => clearInterval(id)
   }, [])
 
-  const load = useCallback(async (start: Date, which: ScheduleView) => {
-    setState({ status: 'loading' })
-    const end = addDays(start, DAYS_IN_WEEK)
-    const params = new URLSearchParams({
-      start: start.toISOString(),
-      end: end.toISOString(),
-      view: which,
-    })
+  // Keyed on the numeric value so the minute-by-minute `now` tick does not
+  // churn the week; it only changes when the week itself does.
+  const currentWeek = useMemo(
+    () => startOfWeekIn(now, timeZone).getTime(),
+    [now, timeZone],
+  )
+  const weekStart = useMemo(
+    () => addWeeksIn(new Date(currentWeek), weekOffset, timeZone),
+    [currentWeek, weekOffset, timeZone],
+  )
 
-    try {
-      const res = await fetch(`/api/schedule?${params}`)
-      if (!res.ok) throw new Error(`Request failed (${res.status})`)
-      setState({ status: 'ready', data: await res.json() })
-    } catch {
-      setState({
-        status: 'error',
-        message: 'Could not load your schedule.',
+  const load = useCallback(
+    async (start: Date, which: ScheduleView, zone: string) => {
+      setState({ status: 'loading' })
+      // A week in the user's zone, which is not always 7 x 24h.
+      const end = addWeeksIn(start, 1, zone)
+      const params = new URLSearchParams({
+        start: start.toISOString(),
+        end: end.toISOString(),
+        view: which,
       })
-    }
-  }, [])
+
+      try {
+        const res = await fetch(`/api/schedule?${params}`)
+        if (!res.ok) throw new Error(`Request failed (${res.status})`)
+        setState({ status: 'ready', data: await res.json() })
+      } catch {
+        setState({
+          status: 'error',
+          message: 'Could not load your schedule.',
+        })
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
-    void load(weekStart, view)
-  }, [load, weekStart, view])
+    void load(weekStart, view, timeZone)
+  }, [load, weekStart, view, timeZone])
 
   const runGenerate = useCallback(
     async (request: GenerateRequest = {}) => {
@@ -99,7 +130,7 @@ export function Schedule() {
               result.periods_created === 1 ? 'period' : 'periods'
             }${kept ? `, keeping ${kept} already settled` : ''}.`,
           )
-          await load(weekStart, view)
+          await load(weekStart, view, timeZone)
         } else {
           // Nothing written yet — hand the choice to the user.
           setDecision(result)
@@ -110,7 +141,7 @@ export function Schedule() {
         setGenerating(false)
       }
     },
-    [load, weekStart, view],
+    [load, weekStart, view, timeZone],
   )
 
   /** Saving an event changes what the generator has to work with, so the
@@ -119,6 +150,26 @@ export function Schedule() {
     setEditing(null)
     await runGenerate()
   }, [runGenerate])
+
+  /** Opens an event's detail, fetching it when it is not on screen.
+   *
+   * A period can serve a deadline in a later week, so the block the user
+   * clicked may have no matching event in the loaded feed. */
+  const openEvent = useCallback(
+    async (id: number) => {
+      if (state.status === 'ready') {
+        const found = state.data.events.find((e) => e.id === id)
+        if (found) {
+          setEditing(found)
+          return
+        }
+      }
+      const res = await fetch(`/api/events/${id}`)
+      if (res.ok) setEditing(await res.json())
+      else setNotice('Could not open that event.')
+    },
+    [state],
+  )
 
   const titleOf = useCallback(
     (eventId: number) => {
@@ -131,8 +182,7 @@ export function Schedule() {
     [state],
   )
 
-  const thisWeek = startOfWeek(now)
-  const isCurrentWeek = weekStart.getTime() === thisWeek.getTime()
+  const isCurrentWeek = weekOffset === 0
 
   const isEmpty =
     state.status === 'ready' &&
@@ -145,21 +195,22 @@ export function Schedule() {
         <div className="schedule-nav">
           <button
             className="icon-button"
-            onClick={() => setWeekStart((w) => addDays(w, -DAYS_IN_WEEK))}
+            onClick={() => setWeekOffset((w) => w - 1)}
             aria-label="Previous week"
           >
             ‹
           </button>
           <button
             className="icon-button"
-            onClick={() => setWeekStart((w) => addDays(w, DAYS_IN_WEEK))}
+            onClick={() => setWeekOffset((w) => w + 1)}
             aria-label="Next week"
           >
             ›
           </button>
-          <h2>{formatWeekRange(weekStart)}</h2>
+          {/* Labelled in the user's zone, so the heading matches the columns. */}
+          <h2>{formatWeekRange(toZoneClock(weekStart, timeZone))}</h2>
           {!isCurrentWeek && (
-            <button className="text-button" onClick={() => setWeekStart(thisWeek)}>
+            <button className="text-button" onClick={() => setWeekOffset(0)}>
               Today
             </button>
           )}
@@ -210,7 +261,7 @@ export function Schedule() {
       {state.status === 'error' && (
         <div className="schedule-status" role="alert">
           <p>{state.message}</p>
-          <button className="button" onClick={() => void load(weekStart, view)}>
+          <button className="button" onClick={() => void load(weekStart, view, timeZone)}>
             Try again
           </button>
         </div>
@@ -235,10 +286,7 @@ export function Schedule() {
             schedule={state.data}
             weekStart={weekStart}
             now={now}
-            onSelectEvent={(id) => {
-              const found = state.data.events.find((e) => e.id === id)
-              if (found) setEditing(found)
-            }}
+            onSelectEvent={(id) => void openEvent(id)}
           />
         </>
       )}

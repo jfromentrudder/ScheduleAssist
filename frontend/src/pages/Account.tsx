@@ -3,24 +3,18 @@ import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import { Calendars } from '../calendars/Calendars'
+import { Scheduling } from '../settings/Scheduling'
+import type { SchedulingPrefs } from '../settings/Scheduling'
 import { APPEARANCES, THEMES } from '../theme/constants'
 import { useTheme } from '../theme/useTheme'
 
-type AccountDetails = {
+type AccountDetails = SchedulingPrefs & {
   id: number
   email: string
   display_name: string | null
   created_at: string
   providers: string[]
-  schedule_horizon_days: number
-  /** Non-null only at the extremes of the allowed range. */
-  schedule_horizon_warning: string | null
 }
-
-// Mirrors MIN/MAX_HORIZON_DAYS in backend/app/scheduler.py, which are also the
-// bounds of the CHECK constraint on the column.
-const MIN_HORIZON_DAYS = 1
-const MAX_HORIZON_DAYS = 21
 
 /** Live preview of a theme's category colours, rendered in the current mode. */
 function ThemeSwatches({ themeId }: { themeId: string }) {
@@ -43,6 +37,9 @@ export function Account() {
   const [account, setAccount] = useState<AccountDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+  // True once a preference changes that the current schedule was not built with.
+  const [stale, setStale] = useState(false)
 
   useEffect(() => {
     fetch('/api/account')
@@ -51,19 +48,57 @@ export function Account() {
       .catch(() => setError('Could not load your account details.'))
   }, [])
 
-  async function handleHorizonChange(days: number) {
-    // Optimistic: the slider must track the thumb, not the network. The
-    // response carries the authoritative value and warning.
-    setAccount((current) =>
-      current ? { ...current, schedule_horizon_days: days } : current,
-    )
+  async function savePrefs(change: Partial<SchedulingPrefs>) {
+    // Optimistic: a slider must track the thumb, not the network. The response
+    // carries the authoritative values and any warning.
+    setAccount((current) => (current ? { ...current, ...change } : current))
+    setError(null)
+    setSaving(true)
+
     const res = await fetch('/api/account', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schedule_horizon_days: days }),
+      body: JSON.stringify(change),
     })
-    if (res.ok) setAccount(await res.json())
-    else setError('Could not save your planning horizon.')
+
+    if (res.ok) {
+      const saved = await res.json()
+      setAccount(saved)
+      // These preferences decide what a generated schedule looks like, so the
+      // existing one no longer reflects them.
+      if (saved.schedule_stale) setStale(true)
+    } else {
+      const detail = await res.json().catch(() => null)
+      setError(
+        typeof detail?.detail === 'string'
+          ? detail.detail
+          : 'Could not save that setting.',
+      )
+      // Roll the optimistic change back to whatever the server still holds.
+      const fresh = await fetch('/api/account')
+      if (fresh.ok) setAccount(await fresh.json())
+    }
+    setSaving(false)
+  }
+
+  async function regenerate() {
+    setSaving(true)
+    const res = await fetch('/api/schedule/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // A full rebuild, not the additive default. The periods that break the
+      // new settings are usually inside the horizon, and an additive pass
+      // protects exactly those — leaving the schedule visibly wrong.
+      body: JSON.stringify({ strategy: 'rebuild' }),
+    })
+    setSaving(false)
+    if (!res.ok) {
+      setError('Could not rebuild your schedule.')
+      return
+    }
+    setStale(false)
+    // A shortfall needs the choice dialog, which lives on the schedule page.
+    if (!(await res.json()).committed) navigate('/')
   }
 
   async function handleSignOut() {
@@ -152,40 +187,26 @@ export function Account() {
 
       <Calendars />
 
-      <section>
-        <h3>Scheduling</h3>
+      {account && (
+        <Scheduling prefs={account} onSave={savePrefs} busy={saving} />
+      )}
 
-        {account && (
-          <div className="field">
-            <label htmlFor="horizon">Planning horizon</label>
-            <p className="field-hint">
-              How far ahead your schedule is settled. Work periods inside the
-              horizon stay put when new events arrive; beyond it they are
-              rearranged to fit.
-            </p>
-            <div className="slider-row">
-              <input
-                id="horizon"
-                type="range"
-                min={MIN_HORIZON_DAYS}
-                max={MAX_HORIZON_DAYS}
-                value={account.schedule_horizon_days}
-                onChange={(e) => void handleHorizonChange(Number(e.target.value))}
-                aria-describedby="horizon-value"
-              />
-              <output id="horizon-value" htmlFor="horizon">
-                {account.schedule_horizon_days}
-                {account.schedule_horizon_days === 1 ? ' day' : ' days'}
-              </output>
-            </div>
-            {account.schedule_horizon_warning && (
-              <p className="field-warning" role="status">
-                {account.schedule_horizon_warning}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      {stale && (
+        <div className="stale-banner" role="status">
+          <span>
+            Your schedule was built with the old settings. Rebuilding moves
+            every period to match them, including ones already settled inside
+            your horizon.
+          </span>
+          <button
+            className="button"
+            disabled={saving}
+            onClick={() => void regenerate()}
+          >
+            {saving ? 'Rebuilding…' : 'Rebuild schedule'}
+          </button>
+        </div>
+      )}
 
       <section>
         <h3>Session</h3>

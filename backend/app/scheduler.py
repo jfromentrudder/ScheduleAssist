@@ -26,6 +26,20 @@ from zoneinfo import ZoneInfo
 # will frequently land here.
 DEFAULT_PERIODS_PER_TASK = 1
 
+# Breathing room between consecutive periods. Back-to-back blocks look tidy on
+# a grid and are unusable in practice: nobody finishes one thing and starts the
+# next in the same minute.
+PERIOD_BUFFER_MINUTES = 10
+
+# --- Meal breaks --------------------------------------------------------
+# Taken greedily: the user's preferred length first, then progressively
+# shorter ones, so a busy day still gets a shorter meal rather than none.
+MEAL_FALLBACK_MINUTES = (60, 45, 30)
+MIN_MEAL_MINUTES = 30
+# How far from the middle of the working day a meal may drift. Without this a
+# fully-booked afternoon would put "lunch" at 9am.
+MEAL_DRIFT_HOURS = 3
+
 # --- Commitment horizon -------------------------------------------------
 # How far ahead the schedule is treated as settled. Periods inside the horizon
 # are not reshuffled when new events arrive, because a plan that rearranges
@@ -37,6 +51,21 @@ MAX_HORIZON_DAYS = 21
 # Bounds worth warning about, but not forbidding.
 SHORT_HORIZON_DAYS = 2
 LONG_HORIZON_DAYS = 14
+
+# --- Preference bounds --------------------------------------------------
+# Mirrored by CHECK constraints and by the API's validation, so a value that
+# reaches the engine has already been agreed by all three.
+MIN_PERIOD_MINUTES = 15
+MAX_PERIOD_MINUTES = 240
+
+# A meal is not optional, which is why the floor is 30 rather than 0. The
+# ceiling stops a mis-set value quietly swallowing the working day.
+DEFAULT_LUNCH_MINUTES = 60
+MIN_LUNCH_MINUTES = 30
+MAX_LUNCH_MINUTES = 120
+
+# Monday = 0, as `date.weekday()` produces.
+WEEKDAYS = (0, 1, 2, 3, 4, 5, 6)
 
 Interval = tuple[datetime, datetime]
 
@@ -107,6 +136,8 @@ class SchedulePlan:
 
     periods: tuple[PeriodPlan, ...]
     unmet: tuple[Unmet, ...]
+    # Time held back for meals. Serves no event, so it carries no event ids.
+    meals: tuple[Interval, ...] = ()
 
     @property
     def new_periods(self) -> tuple[PeriodPlan, ...]:
@@ -190,20 +221,124 @@ def _subtract(window: Interval, merged: list[Interval]) -> list[Interval]:
     return free
 
 
-def _chunk(interval: Interval, period_minutes: int) -> list[Interval]:
-    """Cut a free interval into whole periods, discarding the remainder.
+def _chunk(
+    interval: Interval,
+    period_minutes: int,
+    buffer_minutes: int = PERIOD_BUFFER_MINUTES,
+) -> list[Interval]:
+    """Cut a free interval into whole periods, separated by a buffer.
 
     A partial period is dropped rather than shortened: a 20-minute stub of a
     50-minute period is not a work session the user can do anything with.
+
+    The buffer is the stride, not padding on the block, so periods keep their
+    stated length and simply start further apart. Only the gap *between*
+    periods is reserved — no time is wasted at the end of a run.
     """
     lo, hi = interval
     length = timedelta(minutes=period_minutes)
+    stride = length + timedelta(minutes=max(0, buffer_minutes))
     slots: list[Interval] = []
     cursor = lo
     while cursor + length <= hi:
         slots.append((cursor, cursor + length))
-        cursor += length
+        cursor += stride
     return slots
+
+
+def _meal_lengths(preferred_minutes: int) -> tuple[int, ...]:
+    """Meal lengths to try, longest first.
+
+    Greedy: the user's preference is attempted first, then the standard
+    shorter options, so a packed day yields a rushed meal rather than none.
+    """
+    candidates = [preferred_minutes, *MEAL_FALLBACK_MINUTES]
+    seen: list[int] = []
+    for minutes in candidates:
+        if MIN_MEAL_MINUTES <= minutes <= preferred_minutes and minutes not in seen:
+            seen.append(minutes)
+    return tuple(sorted(seen, reverse=True))
+
+
+def _place_near(free: list[Interval], length: timedelta,
+                target: datetime) -> Interval | None:
+    """Fit `length` into whatever free gap sits closest to `target`."""
+    best: Interval | None = None
+    best_distance: timedelta | None = None
+
+    for lo, hi in free:
+        if hi - lo < length:
+            continue
+        # Centre it on the target where the gap allows, otherwise hug the
+        # nearest edge of the gap.
+        ideal = target - length / 2
+        start = min(max(ideal, lo), hi - length)
+        distance = abs((start + length / 2) - target)
+        if best_distance is None or distance < best_distance:
+            best, best_distance = (start, start + length), distance
+
+    return best
+
+
+def reserve_meals(
+    prefs: Prefs,
+    busy: list[BusyBlock],
+    window_start: datetime,
+    window_end: datetime,
+    now: datetime,
+    meal_minutes: int,
+    existing_meals: Iterable[Interval] = (),
+) -> list[Interval]:
+    """Claim time for a meal in the middle of each workday.
+
+    Days where the user has set their own meal are left alone — that is what
+    overriding means. Days with no room near the middle get no meal rather
+    than one at breakfast time.
+    """
+    tz = ZoneInfo(prefs.timezone)
+    floor = max(_as_utc(window_start), _as_utc(now))
+    cap = _as_utc(window_end)
+    if floor >= cap or not prefs.workdays or meal_minutes <= 0:
+        return []
+
+    unavailable = _union((_as_utc(b.starts_at), _as_utc(b.ends_at))
+                         for b in busy)
+    theirs = _union((_as_utc(s), _as_utc(e)) for s, e in existing_meals)
+    drift = timedelta(hours=MEAL_DRIFT_HOURS)
+    reserved: list[Interval] = []
+
+    day = floor.astimezone(tz).date()
+    last_day = cap.astimezone(tz).date()
+    while day <= last_day:
+        if day.weekday() not in prefs.workdays:
+            day += timedelta(days=1)
+            continue
+
+        start, end = _workday_bounds(day, prefs, tz)
+        lo, hi = max(start, floor), min(end, cap)
+        if lo >= hi:
+            day += timedelta(days=1)
+            continue
+
+        # The user's own meal on this day settles the question.
+        if any(s < hi and e > lo for s, e in theirs):
+            day += timedelta(days=1)
+            continue
+
+        middle = lo + (hi - lo) / 2
+        # Only the part of the day near the middle is eligible.
+        band = _subtract((max(lo, middle - drift), min(hi, middle + drift)),
+                         unavailable)
+
+        for minutes in _meal_lengths(meal_minutes):
+            placed = _place_near(band, timedelta(minutes=minutes), middle)
+            if placed:
+                reserved.append(placed)
+                break
+
+        day += timedelta(days=1)
+
+    return reserved
 
 
 def _workday_bounds(day: date, prefs: Prefs, tz: ZoneInfo) -> Interval:
@@ -284,6 +419,10 @@ def generate(
     now: datetime,
     locked: Iterable[PeriodPlan] = (),
     extra_windows: Iterable[Interval] = (),
+    # Zero means "no meal policy". The engine does not invent one; the caller
+    # passes the user's preference.
+    meal_minutes: int = 0,
+    existing_meals: Iterable[Interval] = (),
 ) -> SchedulePlan:
     """Allocate work periods for `tasks` into the free time in the window.
 
@@ -309,6 +448,13 @@ def generate(
 
     # To the allocator an immovable period is indistinguishable from a meeting.
     occupied = list(busy) + [BusyBlock(p.starts_at, p.ends_at) for p in locked]
+
+    # Meals are claimed before work is allocated, so a packed day cannot leave
+    # the user without one. They then behave exactly like any other commitment.
+    meals = reserve_meals(prefs, occupied, window_start, window_end, now,
+                          meal_minutes, existing_meals)
+    occupied += [BusyBlock(start, end) for start, end in meals]
+
     slots = available_slots(prefs, occupied, window_start,
                             window_end, now, extra_windows)
     consumed = [False] * len(slots)
@@ -349,4 +495,5 @@ def generate(
             )
 
     periods.sort(key=lambda p: (p.starts_at, p.event_ids))
-    return SchedulePlan(periods=tuple(periods), unmet=tuple(unmet))
+    return SchedulePlan(periods=tuple(periods), unmet=tuple(unmet),
+                        meals=tuple(meals))

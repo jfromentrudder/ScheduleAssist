@@ -7,7 +7,9 @@ import enum
 from app.crypto import EncryptedString
 from app.database import Base  # noqa: F401
 from app.scheduler import (
-    DEFAULT_HORIZON_DAYS, MAX_HORIZON_DAYS, MIN_HORIZON_DAYS,
+    DEFAULT_HORIZON_DAYS, DEFAULT_LUNCH_MINUTES, MAX_HORIZON_DAYS,
+    MAX_LUNCH_MINUTES, MAX_PERIOD_MINUTES, MIN_HORIZON_DAYS,
+    MIN_LUNCH_MINUTES, MIN_PERIOD_MINUTES,
 )
 from datetime import datetime, time
 from sqlalchemy import (
@@ -90,6 +92,9 @@ class Availability(str, enum.Enum):
     FREE = "free"
     # Time available for work. The generator fills it with periods.
     WORK_WINDOW = "work_window"
+    # A meal the user has placed themselves. Occupies time like BUSY, and
+    # tells the generator not to reserve another break that day.
+    MEAL = "meal"
 
 
 # Stored as VARCHAR + CHECK rather than a native Postgres ENUM, so adding a
@@ -111,10 +116,17 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         # Bounds mirror the engine's constants so the database, the API and the
-        # generator cannot drift apart on what a legal horizon is.
+        # generator cannot drift apart on what a legal preference is.
         CheckConstraint(
             f"schedule_horizon_days BETWEEN {MIN_HORIZON_DAYS} AND {MAX_HORIZON_DAYS}",
             name="ck_users_horizon_range"),
+        CheckConstraint(
+            f"period_minutes BETWEEN {MIN_PERIOD_MINUTES} AND {MAX_PERIOD_MINUTES}",
+            name="ck_users_period_range"),
+        CheckConstraint(
+            f"lunch_minutes BETWEEN {MIN_LUNCH_MINUTES} AND {MAX_LUNCH_MINUTES}",
+            name="ck_users_lunch_range"),
+        CheckConstraint("day_end > day_start", name="ck_users_day_bounds"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -149,6 +161,10 @@ class User(Base):
     # Length of one generated work period.
     period_minutes: Mapped[int] = mapped_column(
         default=50, server_default=text("50"))
+    # How long to leave clear for a meal in the middle of a working day.
+    lunch_minutes: Mapped[int] = mapped_column(
+        default=DEFAULT_LUNCH_MINUTES,
+        server_default=text(str(DEFAULT_LUNCH_MINUTES)))
     # How many days ahead — counting today — the schedule is treated as
     # settled. Periods inside this horizon are not reshuffled when new events
     # arrive, because a plan that rearranges itself the night before is not a
@@ -399,8 +415,21 @@ class Event(Base):
         secondary=period_events, back_populates="events")
 
 
+class PeriodKind(str, enum.Enum):
+    """What a generated block is for."""
+
+    WORK = "work"
+    # Time held clear for a meal. Serves no event, so it has no linked events.
+    MEAL = "meal"
+
+
+_PERIOD_KIND = Enum(PeriodKind, name="period_kind", native_enum=False,
+                    create_constraint=True,
+                    values_callable=lambda e: [m.value for m in e])
+
+
 class Period(Base):
-    """A generated work block. Derived data: regeneration replaces these."""
+    """A generated block. Derived data: regeneration replaces these."""
 
     __tablename__ = "periods"
     __table_args__ = (
@@ -414,6 +443,9 @@ class Period(Base):
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[PeriodKind] = mapped_column(
+        _PERIOD_KIND, default=PeriodKind.WORK,
+        server_default=PeriodKind.WORK.value)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())

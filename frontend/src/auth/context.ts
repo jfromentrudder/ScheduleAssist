@@ -6,6 +6,8 @@ export type User = {
   display_name: string | null
   theme: string
   appearance: string
+  /** IANA zone the schedule grid renders in, not necessarily the browser's. */
+  timezone: string
 }
 
 export type AuthState = {

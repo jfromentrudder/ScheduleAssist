@@ -6,7 +6,10 @@ export type EventSource = 'imported' | 'manual'
  * - `busy` — occupied; periods are scheduled around it.
  * - `free` — informational; neither blocks time nor offers any.
  * - `work_window` — time available for work; periods are placed *inside* it. */
-export type Availability = 'busy' | 'free' | 'work_window'
+export type Availability = 'busy' | 'free' | 'work_window' | 'meal'
+
+/** Generated blocks are either allocated work or a break held clear. */
+export type PeriodKind = 'work' | 'meal'
 
 /** `generated` is the app's own output; `calendar` is the raw diary. */
 export type ScheduleView = 'generated' | 'calendar'
@@ -33,9 +36,10 @@ export type SchedulePeriod = {
   id: number
   starts_at: string
   ends_at: string
+  kind: PeriodKind
   /** Inside the commitment horizon, so regeneration will not move it. */
   locked: boolean
-  /** The events this block was generated to serve. */
+  /** The events this block was generated to serve. Empty for a meal. */
   events: { id: number; title: string }[]
 }
 
@@ -62,5 +66,5 @@ export type Schedule = {
   periods: SchedulePeriod[]
 }
 
-/** How a block is rendered — the three categories the view must distinguish. */
-export type BlockKind = 'imported' | 'manual' | 'period'
+/** How a block is rendered — the categories the view must distinguish. */
+export type BlockKind = 'imported' | 'manual' | 'period' | 'meal'

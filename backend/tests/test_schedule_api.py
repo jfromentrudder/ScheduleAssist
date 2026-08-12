@@ -9,12 +9,19 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models import Availability, Event, EventSource, EventType, Period
+from app.models import (
+    Availability, Event, EventSource, EventType, Period, PeriodKind,
+)
 from app.schedule import apply_plan, build_plan, split_events
 
 
 def utc(*args) -> datetime:
     return datetime(*args, tzinfo=timezone.utc)
+
+
+def work_periods(db):
+    """Meal breaks are periods too; these tests are about allocated work."""
+    return db.query(Period).filter(Period.kind == PeriodKind.WORK).all()
 
 
 def aware(value: datetime) -> datetime:
@@ -48,11 +55,11 @@ def test_deadlines_become_tasks_and_meetings_become_busy(db_session, user):
     ])
     db_session.commit()
 
-    tasks, busy, windows = split_events(db_session.query(Event).all())
+    inputs = split_events(db_session.query(Event).all())
 
-    assert len(tasks) == 1 and tasks[0].prep_minutes == 120
-    assert len(busy) == 1
-    assert windows == []
+    assert len(inputs.tasks) == 1 and inputs.tasks[0].prep_minutes == 120
+    assert len(inputs.busy) == 1
+    assert inputs.windows == []
 
 
 def test_all_day_events_are_not_treated_as_busy(db_session, user):
@@ -64,10 +71,10 @@ def test_all_day_events_are_not_treated_as_busy(db_session, user):
     db_session.add(event)
     db_session.commit()
 
-    _, busy, windows = split_events(db_session.query(Event).all())
+    inputs = split_events(db_session.query(Event).all())
 
-    assert busy == []
-    assert windows == []
+    assert inputs.busy == []
+    assert inputs.windows == []
 
 
 def test_a_work_window_offers_time_rather_than_blocking_it(db_session, user):
@@ -78,10 +85,24 @@ def test_a_work_window_offers_time_rather_than_blocking_it(db_session, user):
     db_session.add(shift)
     db_session.commit()
 
-    _, busy, windows = split_events(db_session.query(Event).all())
+    inputs = split_events(db_session.query(Event).all())
 
-    assert busy == []
-    assert windows == [(shift.starts_at, shift.ends_at)]
+    assert inputs.busy == []
+    assert inputs.windows == [(shift.starts_at, shift.ends_at)]
+
+
+def test_a_meal_both_blocks_time_and_settles_the_day(db_session, user):
+    """It occupies its hour, and stops another break being reserved."""
+    lunch = make_meeting(user, starts_at=utc(2026, 8, 10, 12),
+                         ends_at=utc(2026, 8, 10, 13), title="Lunch")
+    lunch.availability = Availability.MEAL
+    db_session.add(lunch)
+    db_session.commit()
+
+    inputs = split_events(db_session.query(Event).all())
+
+    assert len(inputs.busy) == 1
+    assert inputs.meals == [(lunch.starts_at, lunch.ends_at)]
 
 
 # --- Reading the feed ---------------------------------------------------
@@ -121,7 +142,7 @@ def test_generate_writes_periods_for_a_deadline(client, db_session, user):
     body = response.json()
     assert body["committed"] is True
     assert body["periods_created"] == 3  # 120 minutes in 50-minute periods
-    assert db_session.query(Period).count() == 3
+    assert len(work_periods(db_session)) == 3
 
 
 def test_generated_periods_link_back_to_their_event(client, db_session, user):
@@ -132,8 +153,9 @@ def test_generated_periods_link_back_to_their_event(client, db_session, user):
 
     client.post("/api/schedule/generate", json={})
 
-    period = db_session.query(Period).one()
-    assert [e.id for e in period.events] == [event.id]
+    periods = work_periods(db_session)
+    assert len(periods) == 1
+    assert [e.id for e in periods[0].events] == [event.id]
 
 
 def test_generate_is_idempotent(client, db_session, user):
@@ -143,10 +165,10 @@ def test_generate_is_idempotent(client, db_session, user):
     db_session.commit()
 
     client.post("/api/schedule/generate", json={})
-    first = {(p.starts_at, p.ends_at) for p in db_session.query(Period).all()}
+    first = {(p.starts_at, p.ends_at) for p in work_periods(db_session)}
     db_session.expire_all()
     client.post("/api/schedule/generate", json={})
-    second = {(p.starts_at, p.ends_at) for p in db_session.query(Period).all()}
+    second = {(p.starts_at, p.ends_at) for p in work_periods(db_session)}
 
     assert first == second
 
@@ -164,8 +186,8 @@ def test_generate_schedules_around_a_meeting(client, db_session, user):
 
     client.post("/api/schedule/generate", json={})
 
-    assert db_session.query(Period).count() > 0
-    for period in db_session.query(Period).all():
+    assert len(work_periods(db_session)) > 0
+    for period in work_periods(db_session):
         assert not (aware(period.starts_at) < start + timedelta(hours=8)
                     and aware(period.ends_at) > start)
 
@@ -184,7 +206,7 @@ def test_shortfall_is_reported_without_writing(client, db_session, user):
     assert body["committed"] is False
     assert body["unmet"]
     assert set(body["options"]) == {"rebuild", "extend_hours", "accept_unmet"}
-    assert db_session.query(Period).count() == 0
+    assert len(work_periods(db_session)) == 0
 
 
 def test_accepting_the_shortfall_commits_what_fits(client, db_session, user):
@@ -199,7 +221,7 @@ def test_accepting_the_shortfall_commits_what_fits(client, db_session, user):
 
     assert body["committed"] is True
     assert body["unmet"]
-    assert db_session.query(Period).count() > 0
+    assert len(work_periods(db_session)) > 0
 
 
 def test_extending_hours_commits_directly(client, db_session, user):
@@ -269,7 +291,7 @@ def test_committed_periods_survive_a_new_deadline(db_session, user):
 
     boundary = utc(2026, 8, 15)  # 5-day horizon from Monday.
     before = {p.id: (p.starts_at, p.ends_at)
-              for p in db_session.query(Period).all()
+              for p in work_periods(db_session)
               if aware(p.starts_at) < boundary}
     assert before, "expected the first pass to commit work inside the horizon"
 
@@ -280,7 +302,7 @@ def test_committed_periods_survive_a_new_deadline(db_session, user):
     regenerate(db_session, user)
 
     after = {p.id: (p.starts_at, p.ends_at)
-             for p in db_session.query(Period).all()}
+             for p in work_periods(db_session)}
     for period_id, times in before.items():
         assert period_id in after, "a locked period was deleted"
         assert after[period_id] == times, "a locked period moved"
@@ -292,14 +314,14 @@ def test_new_work_fills_gaps_inside_the_horizon(db_session, user):
         user, due_at=utc(2026, 8, 21, 17), prep=100, title="Essay"))
     db_session.commit()
     regenerate(db_session, user)
-    first_pass = db_session.query(Period).count()
+    first_pass = len(work_periods(db_session))
 
     db_session.add(make_deadline(
         user, due_at=utc(2026, 8, 12, 17), prep=100, title="Quiz"))
     db_session.commit()
     plan = regenerate(db_session, user)
 
-    assert db_session.query(Period).count() > first_pass
+    assert len(work_periods(db_session)) > first_pass
     assert plan.unmet == ()
 
 
@@ -309,14 +331,14 @@ def test_rebuild_may_move_periods_the_horizon_had_frozen(db_session, user):
         user, due_at=utc(2026, 8, 21, 17), prep=2000, title="Essay"))
     db_session.commit()
     regenerate(db_session, user)
-    before = {p.id for p in db_session.query(Period).all()}
+    before = {p.id for p in work_periods(db_session)}
 
     db_session.add(make_deadline(
         user, due_at=utc(2026, 8, 11, 17), prep=400, title="Exam"))
     db_session.commit()
     regenerate(db_session, user, respect_horizon=False)
 
-    after = {p.id for p in db_session.query(Period).all()}
+    after = {p.id for p in work_periods(db_session)}
     assert before != after
 
 
@@ -327,7 +349,7 @@ def test_periods_already_under_way_are_never_rewritten(db_session, user):
     db_session.commit()
     regenerate(db_session, user)
 
-    morning = {p.id for p in db_session.query(Period).all()
+    morning = {p.id for p in work_periods(db_session)
                if aware(p.starts_at) < utc(2026, 8, 10, 12)}
     assert morning, "expected work scheduled before midday"
 
@@ -335,7 +357,7 @@ def test_periods_already_under_way_are_never_rewritten(db_session, user):
     regenerate(db_session, user, now=utc(2026, 8, 10, 12),
                respect_horizon=False)
 
-    surviving = {p.id for p in db_session.query(Period).all()}
+    surviving = {p.id for p in work_periods(db_session)}
     assert morning <= surviving
 
 

@@ -164,8 +164,9 @@ def test_urgent_task_takes_free_slots_inside_the_frozen_zone(prefs):
 
     fresh = plan.new_periods
     assert len(fresh) == 2
+    # Second period starts after the buffer, not straight after the first.
     assert [p.starts_at for p in fresh] == [
-        utc(2026, 8, 10, 13), utc(2026, 8, 10, 14)]
+        utc(2026, 8, 10, 13), utc(2026, 8, 10, 14, 10)]
     # The committed morning is untouched.
     assert all(p.locked for p in plan.periods if p.event_ids == (1,))
 
@@ -216,8 +217,8 @@ def test_extra_windows_open_time_outside_working_hours(prefs):
     slots = available_slots(prefs, [], MONDAY, MONDAY + timedelta(days=1),
                             now=MONDAY, extra_windows=[evening])
 
-    assert len(slots) == 11  # Eight normal, three in the evening.
-    assert slots[-1] == (utc(2026, 8, 10, 20), utc(2026, 8, 10, 21))
+    assert len(slots) == 9  # Seven in normal hours, two in the evening.
+    assert slots[-1] == (utc(2026, 8, 10, 19, 10), utc(2026, 8, 10, 20, 10))
 
 
 def test_extra_windows_ignore_workdays(prefs):
@@ -226,26 +227,28 @@ def test_extra_windows_ignore_workdays(prefs):
     slots = available_slots(prefs, [], utc(2026, 8, 15), utc(2026, 8, 16),
                             now=utc(2026, 8, 15), extra_windows=[saturday])
 
-    assert len(slots) == 3
+    assert len(slots) == 2
     assert all(start.weekday() == 5 for start, _ in slots)
 
 
 def test_extended_hours_abutting_the_workday_form_one_run():
     """Unioned before chunking, so the seam does not strand a partial period."""
-    fifty = Prefs(workdays=(0,), day_start=time(9, 0), day_end=time(17, 0),
+    # 50-minute periods on a 7.5-hour day: seven fit, and the last 40 minutes
+    # are too short for an eighth once the buffer is counted.
+    fifty = Prefs(workdays=(0,), day_start=time(9, 0), day_end=time(16, 30),
                   period_minutes=50, timezone="UTC")
 
     normal = available_slots(fifty, [], MONDAY, MONDAY + timedelta(days=1),
                              now=MONDAY)
     extended = available_slots(fifty, [], MONDAY, MONDAY + timedelta(days=1),
                                now=MONDAY,
-                               extra_windows=[(utc(2026, 8, 10, 17),
+                               extra_windows=[(utc(2026, 8, 10, 16, 30),
                                                utc(2026, 8, 10, 19))])
 
-    # 9 periods fit in 9-17 with 30 minutes wasted; extending to 19:00 recovers
-    # that stub, giving 12 rather than the 11 separate chunking would yield.
-    assert len(normal) == 9
-    assert len(extended) == 12
+    # Chunking the two spans separately would strand that 40-minute stub and
+    # yield nine; unioning them first recovers it for a tenth period.
+    assert len(normal) == 7
+    assert len(extended) == 10
 
 
 def test_extra_windows_still_respect_busy_time(prefs):
@@ -256,10 +259,7 @@ def test_extra_windows_still_respect_busy_time(prefs):
                                             utc(2026, 8, 10, 21))])
 
     evening = [s for s in slots if s[0].hour >= 18]
-    assert evening == [
-        (utc(2026, 8, 10, 19), utc(2026, 8, 10, 20)),
-        (utc(2026, 8, 10, 20), utc(2026, 8, 10, 21)),
-    ]
+    assert evening == [(utc(2026, 8, 10, 19), utc(2026, 8, 10, 20))]
 
 
 def test_extending_hours_resolves_an_otherwise_unmet_task(prefs):

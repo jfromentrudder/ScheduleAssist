@@ -9,6 +9,7 @@ cannot absorb a new deadline, the endpoint reports what fell short and which
 remedies would actually work, and the user chooses. See `generate_schedule`.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -20,7 +21,9 @@ from zoneinfo import ZoneInfo
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Availability, Event, EventType, Period, User
+from app.models import (
+    Availability, Event, EventType, Period, PeriodKind, User,
+)
 from app.scheduler import (
     BusyBlock,
     PeriodPlan,
@@ -79,6 +82,7 @@ def _period_json(period: Period, boundary: datetime) -> dict:
         "id": period.id,
         "starts_at": period.starts_at,
         "ends_at": period.ends_at,
+        "kind": period.kind.value,
         # Locked is derived from the horizon, not stored: it is a fact about
         # when the client is looking, not about the row.
         "locked": is_locked(
@@ -100,22 +104,29 @@ def user_prefs(user: User) -> Prefs:
     )
 
 
-def split_events(
-    events: list[Event],
-) -> tuple[list[Task], list[BusyBlock], list[tuple[datetime, datetime]]]:
+@dataclass(frozen=True)
+class EngineInputs:
+    """What the events in a window mean to the generator."""
+
+    tasks: list[Task]
+    busy: list[BusyBlock]
+    windows: list[tuple[datetime, datetime]]
+    # Meals the user placed themselves, which override the generated break.
+    meals: list[tuple[datetime, datetime]]
+
+
+def split_events(events: list[Event]) -> EngineInputs:
     """Sort events into work to do, time to avoid, and time to work in.
 
-    The third category is what makes a shift at work usable: it is not a wall
-    to schedule around, it is the part of the day when work actually happens,
-    so the generator places periods inside it.
+    Work windows are what makes a shift usable: not a wall to schedule around,
+    but the part of the day when work actually happens, so periods go inside
+    them. A meal both occupies its time and settles that day's break.
     """
-    tasks: list[Task] = []
-    busy: list[BusyBlock] = []
-    windows: list[tuple[datetime, datetime]] = []
+    inputs = EngineInputs(tasks=[], busy=[], windows=[], meals=[])
 
     for event in events:
         if event.event_type == EventType.DEADLINE:
-            tasks.append(Task(
+            inputs.tasks.append(Task(
                 event_id=event.id,
                 due_at=event.due_at,
                 prep_minutes=event.expected_prep_minutes,
@@ -124,13 +135,20 @@ def split_events(
 
         if not event.starts_at or not event.ends_at:
             continue
+        span = (event.starts_at, event.ends_at)
+
         if event.availability == Availability.BUSY:
-            busy.append(BusyBlock(event.starts_at, event.ends_at))
+            inputs.busy.append(BusyBlock(*span))
         elif event.availability == Availability.WORK_WINDOW:
-            windows.append((event.starts_at, event.ends_at))
+            inputs.windows.append(span)
+        elif event.availability == Availability.MEAL:
+            # Occupies time like any commitment, and stands in for the break
+            # the generator would otherwise reserve.
+            inputs.busy.append(BusyBlock(*span))
+            inputs.meals.append(span)
         # FREE events are informational: neither blocking nor offering time.
 
-    return tasks, busy, windows
+    return inputs
 
 
 def _load_events(db: Session, user: User, start: datetime, end: datetime) -> list[Event]:
@@ -207,6 +225,13 @@ def apply_plan(
         )
         period.events = [events[i] for i in planned.event_ids if i in events]
         db.add(period)
+
+    # Meals are written too, so the time reads as deliberately held rather
+    # than as an unexplained gap in the day.
+    for meal_start, meal_end in plan.meals:
+        if meal_start >= now:
+            db.add(Period(user_id=user.id, starts_at=meal_start,
+                          ends_at=meal_end, kind=PeriodKind.MEAL))
     db.commit()
 
 
@@ -220,10 +245,10 @@ def build_plan(
     extra_windows: list[tuple[datetime, datetime]] = (),
 ) -> SchedulePlan:
     """Run the engine over the user's current rows without writing anything."""
-    tasks, busy, windows = split_events(_load_events(db, user, start, end))
+    inputs = split_events(_load_events(db, user, start, end))
     # A work window offers time the same way the user's own working hours do,
     # so it joins whatever extra availability the caller supplied.
-    extra_windows = [*windows, *extra_windows]
+    extra_windows = [*inputs.windows, *extra_windows]
 
     locked: list[PeriodPlan] = []
     if respect_horizon:
@@ -233,8 +258,9 @@ def build_plan(
                   if is_locked(as_period_plan(p), boundary)]
 
     return generate(
-        tasks, busy, user_prefs(user), start, end, now,
+        inputs.tasks, inputs.busy, user_prefs(user), start, end, now,
         locked=locked, extra_windows=extra_windows,
+        meal_minutes=user.lunch_minutes, existing_meals=inputs.meals,
     )
 
 
