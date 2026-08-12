@@ -1,5 +1,7 @@
 # ScheduleAssist
 
+[![CI](https://github.com/jfromentrudder/ScheduleAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/jfromentrudder/ScheduleAssist/actions/workflows/ci.yml)
+
 **A smart scheduler for bad schedulers.**
 
 ScheduleAssist is a web-based scheduling application designed to make task
@@ -94,6 +96,20 @@ App at http://localhost:5173. Requests to `/api/*` are proxied to the backend
 
 Backend settings come from environment variables or `backend/.env`
 (see `backend/.env.example`). Defaults match the docker-compose database.
+
+## Checks
+
+Every push and pull request runs the same two jobs via GitHub Actions
+(`.github/workflows/ci.yml`). To run them locally before pushing:
+
+```sh
+cd backend && ruff check . && pytest   # lint + tests
+cd frontend && npm run lint && npm run build   # lint + type-check + build
+```
+
+The backend suite needs neither Docker nor network access — it runs against an
+in-memory SQLite database and blocks outbound requests, so `docker compose`
+does not have to be up.
 
 ## Database migrations
 
