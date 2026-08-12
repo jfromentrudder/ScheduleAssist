@@ -17,6 +17,9 @@ function zoned(iso: string, timeZone: string): Date {
 /** Very short blocks still need to be readable and clickable. */
 export const MIN_BLOCK_MINUTES = 24
 
+/** The grid always draws a whole day, midnight to midnight, and scrolls. */
+export const MINUTES_IN_DAY = 24 * 60
+
 export type Block = {
   key: string
   kind: BlockKind
@@ -256,41 +259,31 @@ export function allDayEvents(
   })
 }
 
-/** Vertical bounds of the grid: the user's working hours, widened to fit
- * anything scheduled outside them so nothing is ever clipped. */
-export function gridBounds(
+/** The minute the grid should be scrolled to when a week opens.
+ *
+ * The whole day is always drawn, so nothing can be clipped and this decides
+ * only what is above the fold. Normally that is the start of the user's working
+ * day — the hours they actually care about — but anything scheduled earlier
+ * wins, because a 6am shift the user has to scroll up to find may as well not
+ * be on the screen. */
+export function openingMinute(
   blocks: Block[][],
   markers: DeadlineMarker[][],
   preferredStart: number,
-  preferredEnd: number,
   windows: WorkWindow[][] = [],
-): { startMin: number; endMin: number } {
+): number {
   let startMin = preferredStart
-  let endMin = preferredEnd
 
   for (const day of blocks) {
-    for (const block of day) {
-      startMin = Math.min(startMin, block.startMin)
-      endMin = Math.max(endMin, block.endMin)
-    }
+    for (const block of day) startMin = Math.min(startMin, block.startMin)
   }
-  // A shift starting before the user's usual hours must not be clipped.
   for (const day of windows) {
-    for (const window of day) {
-      startMin = Math.min(startMin, window.startMin)
-      endMin = Math.max(endMin, window.endMin)
-    }
+    for (const window of day) startMin = Math.min(startMin, window.startMin)
   }
   for (const day of markers) {
-    for (const marker of day) {
-      startMin = Math.min(startMin, marker.atMin)
-      endMin = Math.max(endMin, marker.atMin + MIN_BLOCK_MINUTES)
-    }
+    for (const marker of day) startMin = Math.min(startMin, marker.atMin)
   }
 
-  // Snap outward to whole hours so the gutter labels line up.
-  return {
-    startMin: Math.floor(startMin / 60) * 60,
-    endMin: Math.min(24 * 60, Math.ceil(endMin / 60) * 60),
-  }
+  // Snap back to a whole hour so the view opens flush with a gutter label.
+  return Math.max(0, Math.floor(startMin / 60) * 60)
 }

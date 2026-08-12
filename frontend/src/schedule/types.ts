@@ -14,6 +14,14 @@ export type PeriodKind = 'work' | 'meal'
 /** `generated` is the app's own output; `calendar` is the raw diary. */
 export type ScheduleView = 'generated' | 'calendar'
 
+/** How much time is on screen at once. Independent of `ScheduleView`: either
+ *  view can be read a day, a week or a month at a time. */
+export type ScheduleSpan = 'day' | 'week' | 'month'
+
+export function isScheduleSpan(value: unknown): value is ScheduleSpan {
+  return value === 'day' || value === 'week' || value === 'month'
+}
+
 export type ScheduleEvent = {
   id: number
   title: string

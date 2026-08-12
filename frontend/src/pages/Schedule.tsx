@@ -3,20 +3,33 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { EventEditor } from '../events/EventEditor'
 import { ConfirmDialog } from '../schedule/ConfirmDialog'
 import { GenerateDialog } from '../schedule/GenerateDialog'
+import { MonthGrid } from '../schedule/MonthGrid'
 import { ResolveDialog } from '../schedule/ResolveDialog'
-import { WeekView } from '../schedule/WeekView'
+import { TimeGrid } from '../schedule/TimeGrid'
 import { generateSchedule } from '../schedule/generate'
 import type { GenerateRequest, NeedsDecision } from '../schedule/generate'
 import { SettledPeriod, deletePeriod } from '../schedule/periods'
+import { isScheduleSpan } from '../schedule/types'
 import type {
   Schedule as ScheduleData,
   ScheduleEvent,
+  ScheduleSpan,
   ScheduleView,
 } from '../schedule/types'
 import { useAuth } from '../auth/useAuth'
+import { readStored, store } from '../storage'
 import {
+  DAYS_IN_WEEK,
+  MONTH_GRID_DAYS,
+  addDays,
+  addDaysIn,
+  addMonthsIn,
   addWeeksIn,
+  formatDayLabel,
+  formatMonthLabel,
   formatWeekRange,
+  startOfDayIn,
+  startOfMonthGridIn,
   startOfWeekIn,
   toZoneClock,
 } from '../schedule/week'
@@ -25,6 +38,16 @@ const VIEWS: { id: ScheduleView; label: string; hint: string }[] = [
   { id: 'generated', label: 'Schedule', hint: 'The periods ScheduleAssist built for you' },
   { id: 'calendar', label: 'Calendar', hint: 'Your calendars as you wrote them' },
 ]
+
+const SPANS: { id: ScheduleSpan; label: string; hint: string }[] = [
+  { id: 'day', label: 'Day', hint: 'One day, hour by hour' },
+  { id: 'week', label: 'Week', hint: 'The default: a working week at a time' },
+  { id: 'month', label: 'Month', hint: 'What is coming up, and how loaded each day is' },
+]
+
+/** Remembered per browser rather than per account: which span you like is a
+ *  habit of the device you are on, and it needs no migration to store. */
+const SPAN_KEY = 'sa-span'
 
 /** The two views share only commitments, so their legends differ too —
  *  offering a "Work period" key on a view that has none is just noise. */
@@ -43,6 +66,13 @@ const LEGEND: Record<ScheduleView, { kind: string; label: string }[]> = {
     { kind: 'deadline', label: 'Deadline' },
   ],
 }
+
+/** Month draws no blocks, so most of the block grammar has nothing to key. */
+const MONTH_LEGEND = [
+  { kind: 'deadline', label: 'Deadline' },
+  { kind: 'imported', label: 'Commitment' },
+  { kind: 'manual', label: 'Added by you' },
+]
 
 /** Open editor state: an existing event, or `true` while creating a new one. */
 type Editing = ScheduleEvent | true | null
@@ -70,7 +100,11 @@ export function Schedule() {
 
   // Held as an offset rather than a date: the timezone arrives after the first
   // render, and a stored date would be stuck in whatever zone was guessed then.
-  const [weekOffset, setWeekOffset] = useState(0)
+  // Counted in whatever the current span is — days, weeks or months.
+  const [offset, setOffset] = useState(0)
+  const [span, setSpanState] = useState<ScheduleSpan>(() =>
+    readStored(SPAN_KEY, isScheduleSpan, 'week'),
+  )
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   // Updated periodically so the "current time" line stays accurate.
   const [now, setNow] = useState(() => new Date())
@@ -92,22 +126,72 @@ export function Schedule() {
     return () => clearInterval(id)
   }, [])
 
+  /** Switching span lands on today's day, week or month rather than trying to
+   *  carry the date across. Converting between three units produces odd jumps
+   *  at boundaries, and "take me to now" is the predictable answer. */
+  const setSpan = useCallback((next: ScheduleSpan) => {
+    setSpanState(next)
+    setOffset(0)
+    store(SPAN_KEY, next)
+  }, [])
+
   // Keyed on the numeric value so the minute-by-minute `now` tick does not
-  // churn the week; it only changes when the week itself does.
-  const currentWeek = useMemo(
-    () => startOfWeekIn(now, timeZone).getTime(),
-    [now, timeZone],
+  // churn the range; it only changes when the period on screen does.
+  const anchor = useMemo(() => {
+    const start =
+      span === 'day'
+        ? startOfDayIn(now, timeZone)
+        : span === 'week'
+          ? startOfWeekIn(now, timeZone)
+          : startOfMonthGridIn(now, timeZone)
+    return start.getTime()
+  }, [span, now, timeZone])
+
+  /** First instant on screen, and how many day columns it covers. A month grid
+   *  starts on the Monday on or before the 1st, so its leading days are filled
+   *  rather than blank. */
+  const { rangeStart, dayCount } = useMemo(() => {
+    const from = new Date(anchor)
+    if (span === 'day') {
+      return { rangeStart: addDaysIn(from, offset, timeZone), dayCount: 1 }
+    }
+    if (span === 'week') {
+      return {
+        rangeStart: addWeeksIn(from, offset, timeZone),
+        dayCount: DAYS_IN_WEEK,
+      }
+    }
+    // Stepping months from the *grid* start would drift, since that is usually
+    // in the previous month. Step from the 1st, then find the grid again.
+    const firstOfMonth = addDaysIn(from, 7, timeZone)
+    const shifted = addMonthsIn(firstOfMonth, offset, timeZone)
+    return {
+      rangeStart: startOfMonthGridIn(shifted, timeZone),
+      dayCount: MONTH_GRID_DAYS,
+    }
+  }, [anchor, offset, span, timeZone])
+
+  /** The columns to draw, as zone-clock dates. */
+  const days = useMemo(
+    () =>
+      Array.from({ length: dayCount }, (_, i) =>
+        addDays(toZoneClock(rangeStart, timeZone), i),
+      ),
+    [rangeStart, dayCount, timeZone],
   )
-  const weekStart = useMemo(
-    () => addWeeksIn(new Date(currentWeek), weekOffset, timeZone),
-    [currentWeek, weekOffset, timeZone],
+
+  /** A day certain to be inside the month on screen — the grid's first cell
+   *  usually is not, and the month heading depends on getting this right. */
+  const monthOf = useMemo(
+    () => (span === 'month' ? days[10] : days[0]),
+    [days, span],
   )
 
   const load = useCallback(
-    async (start: Date, which: ScheduleView, zone: string) => {
+    async (start: Date, count: number, which: ScheduleView, zone: string) => {
       setState({ status: 'loading' })
-      // A week in the user's zone, which is not always 7 x 24h.
-      const end = addWeeksIn(start, 1, zone)
+      // Counted in the user's zone, which is not always count x 24h.
+      const end = addDaysIn(start, count, zone)
       const params = new URLSearchParams({
         start: start.toISOString(),
         end: end.toISOString(),
@@ -129,8 +213,8 @@ export function Schedule() {
   )
 
   useEffect(() => {
-    void load(weekStart, view, timeZone)
-  }, [load, weekStart, view, timeZone])
+    void load(rangeStart, dayCount, view, timeZone)
+  }, [load, rangeStart, dayCount, view, timeZone])
 
   const runGenerate = useCallback(
     async (request: GenerateRequest = {}) => {
@@ -147,7 +231,7 @@ export function Schedule() {
               result.periods_created === 1 ? 'period' : 'periods'
             }${kept ? `, keeping ${kept} already settled` : ''}.`,
           )
-          await load(weekStart, view, timeZone)
+          await load(rangeStart, dayCount, view, timeZone)
         } else {
           // Nothing written yet — hand the choice to the user.
           setDecision(result)
@@ -158,7 +242,7 @@ export function Schedule() {
         setGenerating(false)
       }
     },
-    [load, weekStart, view, timeZone],
+    [load, rangeStart, dayCount, view, timeZone],
   )
 
   /** Saving an event changes what the generator has to work with, so the
@@ -182,7 +266,7 @@ export function Schedule() {
       try {
         await deletePeriod(periodId, confirmed)
         setPendingDelete(null)
-        await load(weekStart, view, timeZone)
+        await load(rangeStart, dayCount, view, timeZone)
       } catch (failure) {
         if (failure instanceof SettledPeriod) {
           // Settled since this page loaded, or clicked from a stale view. The
@@ -199,7 +283,7 @@ export function Schedule() {
         setRemoving(false)
       }
     },
-    [load, weekStart, view, timeZone],
+    [load, rangeStart, dayCount, view, timeZone],
   )
 
   const handleDeletePeriod = useCallback(
@@ -246,7 +330,36 @@ export function Schedule() {
     [state],
   )
 
-  const isCurrentWeek = weekOffset === 0
+  /** Clicking a date in the month grid drops into that single day.
+   *
+   * The offset is in days once the span is `day`, so it is the distance from
+   * today — which is exactly what the grid's own dates give us. */
+  const openDay = useCallback(
+    (day: Date) => {
+      const today = toZoneClock(new Date(), timeZone)
+      today.setHours(0, 0, 0, 0)
+      const target = new Date(day)
+      target.setHours(0, 0, 0, 0)
+      // Both are zone-clock midnights, so a plain difference in days is safe
+      // even across a DST boundary; rounding absorbs the stray hour.
+      const days = Math.round(
+        (target.getTime() - today.getTime()) / 86_400_000,
+      )
+      setSpanState('day')
+      store(SPAN_KEY, 'day')
+      setOffset(days)
+    },
+    [timeZone],
+  )
+
+  const heading =
+    span === 'day'
+      ? formatDayLabel(days[0])
+      : span === 'week'
+        ? formatWeekRange(days[0])
+        : formatMonthLabel(monthOf)
+
+  const legend = span === 'month' ? MONTH_LEGEND : LEGEND[view]
 
   const isEmpty =
     state.status === 'ready' &&
@@ -259,22 +372,22 @@ export function Schedule() {
         <div className="schedule-nav">
           <button
             className="icon-button"
-            onClick={() => setWeekOffset((w) => w - 1)}
-            aria-label="Previous week"
+            onClick={() => setOffset((o) => o - 1)}
+            aria-label={`Previous ${span}`}
           >
             ‹
           </button>
           <button
             className="icon-button"
-            onClick={() => setWeekOffset((w) => w + 1)}
-            aria-label="Next week"
+            onClick={() => setOffset((o) => o + 1)}
+            aria-label={`Next ${span}`}
           >
             ›
           </button>
           {/* Labelled in the user's zone, so the heading matches the columns. */}
-          <h2>{formatWeekRange(toZoneClock(weekStart, timeZone))}</h2>
-          {!isCurrentWeek && (
-            <button className="text-button" onClick={() => setWeekOffset(0)}>
+          <h2>{heading}</h2>
+          {offset !== 0 && (
+            <button className="text-button" onClick={() => setOffset(0)}>
               Today
             </button>
           )}
@@ -294,23 +407,42 @@ export function Schedule() {
           </button>
         </div>
 
-        <div className="view-switch" role="group" aria-label="View">
-          {VIEWS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className="choice"
-              aria-pressed={view === option.id}
-              onClick={() => setView(option.id)}
-              title={option.hint}
-            >
-              {option.label}
-            </button>
-          ))}
+        {/* Two independent axes, as in Google Calendar: how much time is on
+            screen, and which of the two readings of it you want. */}
+        <div className="switch-row">
+          <div className="view-switch" role="group" aria-label="Time span">
+            {SPANS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="choice"
+                aria-pressed={span === option.id}
+                onClick={() => setSpan(option.id)}
+                title={option.hint}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="view-switch" role="group" aria-label="View">
+            {VIEWS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="choice"
+                aria-pressed={view === option.id}
+                onClick={() => setView(option.id)}
+                title={option.hint}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <ul className="legend">
-          {LEGEND[view].map((item) => (
+          {legend.map((item) => (
             <li key={item.kind}>
               <span className={`swatch kind-${item.kind}`} /> {item.label}
             </li>
@@ -325,7 +457,7 @@ export function Schedule() {
       {state.status === 'error' && (
         <div className="schedule-status" role="alert">
           <p>{state.message}</p>
-          <button className="button" onClick={() => void load(weekStart, view, timeZone)}>
+          <button className="button" onClick={() => void load(rangeStart, dayCount, view, timeZone)}>
             Try again
           </button>
         </div>
@@ -342,17 +474,28 @@ export function Schedule() {
           {isEmpty && (
             <p className="schedule-status">
               {view === 'generated'
-                ? 'Nothing scheduled this week yet. Add a deadline, or mark one of your calendars as school or work so its due dates are picked up.'
-                : 'Nothing in your calendars this week.'}
+                ? `Nothing scheduled this ${span} yet. Add a deadline, or mark one of your calendars as school or work so its due dates are picked up.`
+                : `Nothing in your calendars this ${span}.`}
             </p>
           )}
-          <WeekView
-            schedule={state.data}
-            weekStart={weekStart}
-            now={now}
-            onSelectEvent={(id) => void openEvent(id)}
-            onDeletePeriod={handleDeletePeriod}
-          />
+          {span === 'month' ? (
+            <MonthGrid
+              schedule={state.data}
+              days={days}
+              monthOf={monthOf}
+              now={now}
+              onSelectEvent={(id) => void openEvent(id)}
+              onSelectDay={openDay}
+            />
+          ) : (
+            <TimeGrid
+              schedule={state.data}
+              days={days}
+              now={now}
+              onSelectEvent={(id) => void openEvent(id)}
+              onDeletePeriod={handleDeletePeriod}
+            />
+          )}
         </>
       )}
 

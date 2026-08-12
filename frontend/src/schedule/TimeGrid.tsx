@@ -1,16 +1,15 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import {
+  MINUTES_IN_DAY,
   allDayEvents,
   buildDayBlocks,
   buildDeadlineMarkers,
   buildWorkWindows,
-  gridBounds,
+  openingMinute,
 } from './layout'
 import type { Schedule } from './types'
 import {
-  DAYS_IN_WEEK,
-  addDays,
   formatHour,
   isSameDay,
   minutesSinceMidnight,
@@ -22,7 +21,9 @@ const PX_PER_MINUTE = 0.9
 
 type Props = {
   schedule: Schedule
-  weekStart: Date
+  /** The columns to draw, as zone-clock dates — one for a day view, seven for a
+   *  week. The grid itself is indifferent to how many there are. */
+  days: Date[]
   now: Date
   /** Opens an event's detail. Periods are generated, so they are not editable. */
   onSelectEvent?: (eventId: number) => void
@@ -31,9 +32,10 @@ type Props = {
   onDeletePeriod?: (periodId: number, settled: boolean) => void
 }
 
-export function WeekView({
+/** The time-axis calendar: a scrollable 24-hour grid over one or more days. */
+export function TimeGrid({
   schedule,
-  weekStart,
+  days,
   now,
   onSelectEvent,
   onDeletePeriod,
@@ -41,16 +43,6 @@ export function WeekView({
   const { events, periods, preferences } = schedule
   const timeZone = preferences.timezone
 
-  // Everything below positions blocks with ordinary local date methods, so
-  // instants are converted once here into the user's zone. These are display
-  // values only — `weekStart` and `now` stay real instants for their callers.
-  const days = useMemo(
-    () =>
-      Array.from({ length: DAYS_IN_WEEK }, (_, i) =>
-        addDays(toZoneClock(weekStart, timeZone), i),
-      ),
-    [weekStart, timeZone],
-  )
   const zonedNow = useMemo(() => toZoneClock(now, timeZone), [now, timeZone])
 
   const perDay = useMemo(
@@ -65,32 +57,42 @@ export function WeekView({
     [days, events, periods, timeZone],
   )
 
-  const bounds = useMemo(
-    () =>
-      gridBounds(
-        perDay.map((d) => d.blocks),
-        perDay.map((d) => d.markers),
-        parseClockTime(preferences.day_start),
-        parseClockTime(preferences.day_end),
-        perDay.map((d) => d.windows),
-      ),
-    [perDay, preferences.day_start, preferences.day_end],
-  )
-
-  const totalMinutes = bounds.endMin - bounds.startMin
-  const bodyHeight = totalMinutes * PX_PER_MINUTE
-  const offsetOf = (minutes: number) => (minutes - bounds.startMin) * PX_PER_MINUTE
+  // The whole day is always drawn — midnight to midnight — so nothing is ever
+  // clipped and the user can reach any hour by scrolling.
+  const bodyHeight = MINUTES_IN_DAY * PX_PER_MINUTE
+  const offsetOf = (minutes: number) => minutes * PX_PER_MINUTE
 
   const hourLines = useMemo(() => {
     const hours: number[] = []
-    for (let m = bounds.startMin; m <= bounds.endMin; m += 60) hours.push(m)
+    for (let m = 0; m <= MINUTES_IN_DAY; m += 60) hours.push(m)
     return hours
-  }, [bounds.startMin, bounds.endMin])
+  }, [])
+
+  const openAt = useMemo(
+    () =>
+      openingMinute(
+        perDay.map((d) => d.blocks),
+        perDay.map((d) => d.markers),
+        parseClockTime(preferences.day_start),
+        perDay.map((d) => d.windows),
+      ),
+    [perDay, preferences.day_start],
+  )
+
+  const scroller = useRef<HTMLDivElement>(null)
+
+  // Opens on the working day rather than on midnight. Re-runs when the week
+  // changes, and when `openAt` itself moves — something newly scheduled before
+  // the user's usual hours is worth bringing into view.
+  useEffect(() => {
+    const el = scroller.current
+    if (el) el.scrollTop = openAt * PX_PER_MINUTE
+  }, [openAt, days])
 
   const workdays = new Set(preferences.workdays)
   const hasAllDay = perDay.some((d) => d.allDay.length > 0)
+  // No visibility check needed: every minute of the day is on the grid now.
   const nowMinutes = minutesSinceMidnight(zonedNow)
-  const nowVisible = nowMinutes >= bounds.startMin && nowMinutes <= bounds.endMin
 
   // The horizon always lands on a local midnight, so it separates whole day
   // columns rather than cutting through one. The calendar view has no periods
@@ -106,45 +108,62 @@ export function WeekView({
   )
 
   return (
-    <div className="week" style={{ '--px-per-minute': PX_PER_MINUTE } as React.CSSProperties}>
-      <div className="week-head">
-        <div className="week-gutter" aria-hidden="true" />
-        {days.map((day, i) => {
-          const isToday = isSameDay(day, zonedNow)
-          const isWorkday = workdays.has((day.getDay() + 6) % 7)
-          return (
-            <div
-              key={day.toISOString()}
-              className={`week-day-head${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}${i === horizonIndex ? ' is-horizon' : ''}`}
-            >
-              <span className="week-dow">
-                {day.toLocaleDateString([], { weekday: 'short' })}
-              </span>
-              <span className="week-date">
-                {day.getDate()}
-                {isToday && <span className="sr-only"> (today)</span>}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+    <div
+      className="week"
+      style={
+        {
+          '--px-per-minute': PX_PER_MINUTE,
+          // Drives the column template, so one day fills the width the same way
+          // seven share it.
+          '--day-count': days.length,
+        } as React.CSSProperties
+      }
+    >
+      {/* The day headings scroll in the same box as the columns they label, and
+          stick to the top of it. Keeping them outside would let a scrollbar
+          narrow the body without narrowing the header, drifting every column
+          out of line with its own date. */}
+      <div className="week-scroll" ref={scroller}>
+        <div className="week-frozen">
+          <div className="week-head">
+            <div className="week-gutter" aria-hidden="true" />
+            {days.map((day, i) => {
+              const isToday = isSameDay(day, zonedNow)
+              const isWorkday = workdays.has((day.getDay() + 6) % 7)
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={`week-day-head${isToday ? ' is-today' : ''}${isWorkday ? '' : ' is-off'}${i === horizonIndex ? ' is-horizon' : ''}`}
+                >
+                  <span className="week-dow">
+                    {day.toLocaleDateString([], { weekday: 'short' })}
+                  </span>
+                  <span className="week-date">
+                    {day.getDate()}
+                    {isToday && <span className="sr-only"> (today)</span>}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
 
-      {hasAllDay && (
-        <div className="week-allday">
-          <div className="week-gutter">All day</div>
-          {perDay.map(({ day, allDay }) => (
-            <div key={day.toISOString()} className="week-allday-cell">
-              {allDay.map((event) => (
-                <span key={event.id} className={`chip kind-${event.source}`}>
-                  {event.title}
-                </span>
+          {hasAllDay && (
+            <div className="week-allday">
+              <div className="week-gutter">All day</div>
+              {perDay.map(({ day, allDay }) => (
+                <div key={day.toISOString()} className="week-allday-cell">
+                  {allDay.map((event) => (
+                    <span key={event.id} className={`chip kind-${event.source}`}>
+                      {event.title}
+                    </span>
+                  ))}
+                </div>
               ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
 
-      <div className="week-body" style={{ height: `${bodyHeight}px` }}>
+        <div className="week-body" style={{ height: `${bodyHeight}px` }}>
         <div className="week-gutter week-hours">
           {hourLines.map((minutes) => (
             <span key={minutes} className="week-hour" style={{ top: `${offsetOf(minutes)}px` }}>
@@ -271,7 +290,7 @@ export function WeekView({
                 </div>
               ))}
 
-              {isToday && nowVisible && (
+              {isToday && (
                 <div
                   className="now-line"
                   style={{ top: `${offsetOf(nowMinutes)}px` }}
@@ -281,6 +300,7 @@ export function WeekView({
             </div>
           )
         })}
+        </div>
       </div>
     </div>
   )

@@ -8,12 +8,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   MIN_BLOCK_MINUTES,
+  MINUTES_IN_DAY,
   allDayEvents,
   assignLanes,
   buildDayBlocks,
   buildDeadlineMarkers,
   buildWorkWindows,
-  gridBounds,
+  openingMinute,
 } from './layout'
 import type { ScheduleEvent, SchedulePeriod } from './types'
 
@@ -325,17 +326,18 @@ describe('allDayEvents', () => {
   })
 })
 
-// --- Grid bounds --------------------------------------------------------
+// --- Where the view opens -----------------------------------------------
+//
+// The grid draws a whole day and scrolls, so this decides only what is above
+// the fold. Nothing is ever clipped, which is why there is no upper bound to
+// compute any more.
 
-describe('gridBounds', () => {
-  it('uses the working hours when nothing falls outside them', () => {
-    expect(gridBounds([], [], 9 * 60, 17 * 60)).toEqual({
-      startMin: 9 * 60,
-      endMin: 17 * 60,
-    })
+describe('openingMinute', () => {
+  it('opens on the start of the working day', () => {
+    expect(openingMinute([], [], 9 * 60)).toBe(9 * 60)
   })
 
-  it('widens to fit a block before the working day', () => {
+  it('opens earlier when a block would otherwise be above the fold', () => {
     const early = buildDayBlocks(
       [event({ starts_at: '2026-08-10T06:30:00Z', ends_at: '2026-08-10T07:00:00Z' })],
       [],
@@ -343,11 +345,11 @@ describe('gridBounds', () => {
       UTC,
     )
 
-    // Snapped outward to a whole hour so the gutter labels line up.
-    expect(gridBounds([early], [], 9 * 60, 17 * 60).startMin).toBe(6 * 60)
+    // Snapped back to a whole hour so the view opens flush with a gutter label.
+    expect(openingMinute([early], [], 9 * 60)).toBe(6 * 60)
   })
 
-  it('widens to fit a shift that starts before the working day', () => {
+  it('opens earlier for a shift that starts before the working day', () => {
     const windows = buildWorkWindows(
       [
         event({
@@ -361,41 +363,49 @@ describe('gridBounds', () => {
     )
 
     // Every argument is per-day, so a single day's windows still nest.
-    expect(gridBounds([], [], 9 * 60, 17 * 60, [windows]).startMin).toBe(5 * 60)
+    expect(openingMinute([], [], 9 * 60, [windows])).toBe(5 * 60)
   })
 
-  it('leaves room below a late deadline flag', () => {
+  it('opens earlier for a deadline due before the working day', () => {
     const markers = buildDeadlineMarkers(
       [
         event({
           event_type: 'deadline',
           starts_at: null,
           ends_at: null,
-          due_at: '2026-08-10T22:00:00Z',
+          due_at: '2026-08-10T02:30:00Z',
         }),
       ],
       DAY,
       UTC,
     )
 
-    // 22:00 plus the flag's own height, snapped out to the next whole hour.
-    expect(gridBounds([], [markers], 9 * 60, 17 * 60).endMin).toBe(23 * 60)
+    expect(openingMinute([], [markers], 9 * 60)).toBe(2 * 60)
   })
 
-  it('never runs past the end of the day', () => {
-    const markers = buildDeadlineMarkers(
-      [
-        event({
-          event_type: 'deadline',
-          starts_at: null,
-          ends_at: null,
-          due_at: '2026-08-10T23:59:00Z',
-        }),
-      ],
+  it('ignores anything later than the working day, which is reachable by scrolling', () => {
+    const late = buildDayBlocks(
+      [event({ starts_at: '2026-08-10T22:00:00Z', ends_at: '2026-08-10T23:00:00Z' })],
+      [],
       DAY,
       UTC,
     )
 
-    expect(gridBounds([], [markers], 9 * 60, 17 * 60).endMin).toBe(24 * 60)
+    expect(openingMinute([late], [], 9 * 60)).toBe(9 * 60)
+  })
+
+  it('never opens above midnight', () => {
+    const atMidnight = buildDayBlocks(
+      [event({ starts_at: '2026-08-10T00:00:00Z', ends_at: '2026-08-10T01:00:00Z' })],
+      [],
+      DAY,
+      UTC,
+    )
+
+    expect(openingMinute([atMidnight], [], 9 * 60)).toBe(0)
+  })
+
+  it('draws a full day, so every minute is reachable', () => {
+    expect(MINUTES_IN_DAY).toBe(1440)
   })
 })

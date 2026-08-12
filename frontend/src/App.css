@@ -441,11 +441,38 @@ main {
   overflow: hidden;
 }
 
+/* The grid is a full 24 hours tall, so it scrolls inside a bounded window.
+   Clamped rather than a bare vh: on a short laptop a percentage collapses to a
+   couple of hours, and on a tall display it would stretch past what anyone
+   reads at once. */
+.week-scroll {
+  overflow-y: auto;
+  max-height: clamp(340px, 64vh, 760px);
+  /* Anchoring off, or the browser helpfully "corrects" our scroll position
+     when blocks appear after a generate. */
+  overflow-anchor: none;
+}
+
+/* Day headings and the all-day strip travel together and stay put. Frozen as
+   one block so the all-day strip needs no hard-coded offset for the height of
+   the headings above it. */
+.week-frozen {
+  position: sticky;
+  top: 0;
+  /* Above the blocks (1), their delete buttons (2) and deadline rules (3). */
+  z-index: 6;
+  /* Opaque: blocks scroll underneath this, and the all-day cells are
+     transparent on their own. */
+  background: var(--ground);
+}
+
 .week-head,
 .week-allday,
 .week-body {
   display: grid;
-  grid-template-columns: var(--gutter) repeat(7, minmax(0, 1fr));
+  /* Column count comes from the component, so a single day fills the width the
+     same way seven share it. Falls back to a week if the property is missing. */
+  grid-template-columns: var(--gutter) repeat(var(--day-count, 7), minmax(0, 1fr));
 }
 
 .week-head {
@@ -555,6 +582,186 @@ main {
   inset-inline: 0;
   border-top: 1px solid var(--line-soft);
   pointer-events: none;
+}
+
+/* ------------------------------------------------------------- month view
+   No time axis and no scroll: six rows of seven always fit, and a month is
+   read to find what is coming rather than what happens at two o'clock. */
+.month {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.month-head,
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.month-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.month-dow {
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  border-left: 1px solid var(--line);
+
+  &:first-child {
+    border-left: 0;
+  }
+}
+
+.month-grid {
+  /* Six equal rows, so every month is the same height and the grid never
+     reflows between a 28- and a 31-day month. */
+  grid-auto-rows: minmax(96px, 1fr);
+}
+
+.month-cell {
+  min-width: 0;
+  padding: 4px 5px 5px;
+  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+
+  /* Days borrowed from the months either side: present for a full first and
+     last row, but clearly not part of this month. */
+  &.is-outside {
+    background: var(--off);
+
+    .month-date {
+      color: var(--ink-3);
+    }
+  }
+  &.is-off {
+    background: var(--off);
+  }
+  &.is-today {
+    background: var(--today);
+  }
+  /* Both at once: today's tint wins, since it is the more useful signal. */
+  &.is-today.is-off,
+  &.is-today.is-outside {
+    background: var(--today);
+  }
+}
+
+.month-cell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+
+.month-date {
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+button.month-date {
+  cursor: pointer;
+
+  &:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+}
+
+.is-today .month-date {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.month-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.month-chip {
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-align: left;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+
+  &:hover {
+    filter: brightness(1.05);
+  }
+}
+
+.month-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.month-chip-when {
+  flex-shrink: 0;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Same three categories as the week grid, same tokens. A deadline is a moment
+   rather than a span, so it keeps the due colour it has everywhere else. */
+.month-chip.kind-imported { background: var(--imp-bg); color: var(--imp); }
+.month-chip.kind-manual { background: var(--man-bg); color: var(--man); }
+.month-chip.kind-deadline {
+  background: var(--danger-bg);
+  color: var(--due);
+  font-weight: 550;
+}
+
+.month-more {
+  font-size: 11px;
+  padding: 0 5px;
+  color: var(--ink-3);
+}
+
+/* The app's own output, collapsed to one line. Chips would bury the
+   commitments the month exists to show. */
+.month-load {
+  margin-top: auto;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--per);
+  background: var(--per-bg);
+  border: 1px dashed var(--per);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Both switches on one line, wrapping together on a narrow window. */
+.switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .connection-list {

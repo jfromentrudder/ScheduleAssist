@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { useAuth } from '../auth/useAuth'
+import { readStored, store } from '../storage'
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_THEME,
@@ -11,24 +12,6 @@ import {
 } from './constants'
 import type { AppearanceId, ThemeId } from './constants'
 import { ThemeContext } from './context'
-
-function readStored<T>(key: string, guard: (v: unknown) => v is T, fallback: T): T {
-  try {
-    const stored = localStorage.getItem(key)
-    return guard(stored) ? stored : fallback
-  } catch {
-    // Private browsing can throw on localStorage access.
-    return fallback
-  }
-}
-
-function store(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    // Preference still applies for this session; it just won't persist locally.
-  }
-}
 
 const darkQuery = () => window.matchMedia('(prefers-color-scheme: dark)')
 

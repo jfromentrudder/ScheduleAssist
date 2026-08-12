@@ -1,16 +1,20 @@
-/** Tests for the calendar view.
+/** Tests for the time-axis calendar.
  *
  * The grid is the app's main screen and had never been machine-verified: until
  * now the only checks on it were that it compiled. These cover what the markup
  * has to get right — which blocks appear, what is clickable, and the structural
- * cues (today, non-workdays, the settled edge) that carry meaning. */
+ * cues (today, non-workdays, the settled edge) that carry meaning.
+ *
+ * It draws whatever days it is handed, so the same component serves the day and
+ * week spans; the column count is the only difference between them. */
 
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { WeekView } from './WeekView'
+import { TimeGrid } from './TimeGrid'
 import type { Schedule, ScheduleEvent, SchedulePeriod } from './types'
+import { DAYS_IN_WEEK, addDays, toZoneClock } from './week'
 
 /** Monday 10 Aug 2026, the week every fixture below describes. */
 const WEEK_START = new Date('2026-08-10T00:00:00Z')
@@ -67,11 +71,18 @@ function schedule(over: Partial<Schedule> = {}): Schedule {
   }
 }
 
+/** The seven columns of the fixture week, as the page would compute them. */
+function weekDays(count = DAYS_IN_WEEK): Date[] {
+  return Array.from({ length: count }, (_, i) =>
+    addDays(toZoneClock(WEEK_START, 'UTC'), i),
+  )
+}
+
 function draw(over: Partial<Schedule> = {}, props: Record<string, unknown> = {}) {
   return render(
-    <WeekView
+    <TimeGrid
       schedule={schedule(over)}
-      weekStart={WEEK_START}
+      days={weekDays()}
       now={NOW}
       {...props}
     />,
@@ -85,6 +96,24 @@ describe('the grid itself', () => {
     const { container } = draw()
 
     expect(container.querySelectorAll('.week-col')).toHaveLength(7)
+  })
+
+  it('draws whatever days it is given, so one day is the same component', () => {
+    const { container } = render(
+      <TimeGrid schedule={schedule()} days={weekDays(1)} now={NOW} />,
+    )
+
+    expect(container.querySelectorAll('.week-col')).toHaveLength(1)
+    expect(container.querySelectorAll('.week-day-head')).toHaveLength(1)
+  })
+
+  it('tells the CSS how many columns to share the width', () => {
+    const { container } = render(
+      <TimeGrid schedule={schedule()} days={weekDays(1)} now={NOW} />,
+    )
+    const grid = container.querySelector('.week') as HTMLElement
+
+    expect(grid.style.getPropertyValue('--day-count')).toBe('1')
   })
 
   it('marks today, and only today', () => {
@@ -351,17 +380,104 @@ describe('the horizon rule', () => {
 // --- The current-time line ---------------------------------------------
 
 describe('the now line', () => {
-  it('appears in today\'s column when the time is on screen', () => {
+  it('appears in today\'s column, and only there', () => {
     const { container } = draw()
     const today = container.querySelector('.week-col.is-today')!
 
     expect(within(today as HTMLElement).getByLabelText('Current time')).toBeInTheDocument()
+    expect(container.querySelectorAll('.now-line')).toHaveLength(1)
   })
 
-  it('is hidden when the clock falls outside the drawn hours', () => {
-    // 03:00 sits above a 9-to-5 grid with nothing scheduled early.
+  it('shows at any hour, since the whole day is drawn', () => {
+    // Previously hidden: 03:00 fell outside a 9-to-5 grid. The grid now covers
+    // midnight to midnight, so there is no hour the line can fall off.
     const { container } = draw({}, { now: new Date('2026-08-11T03:00:00Z') })
+    const line = container.querySelector('.now-line') as HTMLElement
 
-    expect(container.querySelector('.now-line')).toBeNull()
+    expect(line).not.toBeNull()
+    // 03:00 = 180 minutes, at 0.9px per minute, measured from midnight.
+    expect(line.style.top).toBe('162px')
+  })
+})
+
+// --- Scrolling through the whole day ------------------------------------
+
+describe('the full-day grid', () => {
+  it('draws every hour from midnight to midnight', () => {
+    const { container } = draw()
+    const gutter = container.querySelector('.week-hours')!
+
+    // 25 labels: one per hour boundary, midnight at both ends.
+    expect(gutter.querySelectorAll('.week-hour')).toHaveLength(25)
+  })
+
+  it('is a full 24 hours tall regardless of the working day', () => {
+    const { container } = draw({
+      preferences: { ...schedule().preferences, day_start: '10:00:00', day_end: '14:00:00' },
+    })
+    const body = container.querySelector('.week-body') as HTMLElement
+
+    // 1440 minutes x 0.9px. A 10-to-2 working day must not shrink the grid.
+    expect(body.style.height).toBe('1296px')
+  })
+
+  it('puts a block at its true offset from midnight', () => {
+    // Not relative to the working day: 09:00 is 540 minutes in, so 486px.
+    const { container } = draw({ events: [event()] })
+    const block = container.querySelector('.block.kind-imported') as HTMLElement
+
+    expect(block.style.top).toBe('486px')
+  })
+
+  it('scrolls the body rather than clipping it', () => {
+    const { container } = draw()
+
+    expect(container.querySelector('.week-scroll')).not.toBeNull()
+  })
+
+  it('keeps the day headings frozen inside the scrolling box', () => {
+    // Both live in the same scroll container on purpose: a scrollbar that
+    // narrowed the body but not the header would drift every column out of
+    // line with its date.
+    const { container } = draw()
+    const scroll = container.querySelector('.week-scroll')!
+
+    expect(scroll.querySelector('.week-frozen .week-head')).not.toBeNull()
+    expect(scroll.querySelector('.week-body')).not.toBeNull()
+  })
+})
+
+describe('where the view opens', () => {
+  it('opens on the start of the working day, not on midnight', () => {
+    const { container } = draw()
+    const scroll = container.querySelector('.week-scroll') as HTMLElement
+
+    // 09:00 = 540 minutes x 0.9px.
+    expect(scroll.scrollTop).toBe(486)
+  })
+
+  it('follows the working day when the user changes it', () => {
+    const { container } = draw({
+      preferences: { ...schedule().preferences, day_start: '06:00:00' },
+    })
+    const scroll = container.querySelector('.week-scroll') as HTMLElement
+
+    expect(scroll.scrollTop).toBe(6 * 60 * 0.9)
+  })
+
+  it('opens earlier when something is scheduled before those hours', () => {
+    const { container } = draw({
+      events: [
+        event({
+          availability: 'work_window',
+          title: 'Early shift',
+          starts_at: '2026-08-10T05:00:00Z',
+          ends_at: '2026-08-10T09:00:00Z',
+        }),
+      ],
+    })
+    const scroll = container.querySelector('.week-scroll') as HTMLElement
+
+    expect(scroll.scrollTop).toBe(5 * 60 * 0.9)
   })
 })

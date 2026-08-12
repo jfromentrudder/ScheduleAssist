@@ -10,13 +10,21 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  MONTH_GRID_DAYS,
   addDays,
+  addDaysIn,
+  addMonthsIn,
   addWeeksIn,
+  formatDayLabel,
+  formatMonthLabel,
   formatWeekRange,
   fromZoneClock,
   isSameDay,
   minutesSinceMidnight,
   parseClockTime,
+  startOfDayIn,
+  startOfMonthGridIn,
+  startOfMonthIn,
   startOfWeekIn,
   toZoneClock,
 } from './week'
@@ -134,6 +142,132 @@ describe('addWeeksIn', () => {
   })
 })
 
+// --- Day and month navigation (the day / month spans) --------------------
+
+describe('startOfDayIn', () => {
+  it('returns local midnight in the user\'s zone', () => {
+    const start = startOfDayIn(new Date('2026-08-12T18:00:00Z'), NY)
+
+    expect(start.toISOString()).toBe('2026-08-12T04:00:00.000Z')
+    expect(toZoneClock(start, NY).getHours()).toBe(0)
+  })
+
+  it('can land on a different calendar day than UTC', () => {
+    // 02:00 UTC Wednesday is still Tuesday evening in New York.
+    const start = startOfDayIn(new Date('2026-08-12T02:00:00Z'), NY)
+
+    expect(toZoneClock(start, NY).getDate()).toBe(11)
+  })
+})
+
+describe('addDaysIn', () => {
+  it('steps a day', () => {
+    const next = addDaysIn(new Date('2026-08-10T00:00:00Z'), 1, UTC)
+
+    expect(next.toISOString()).toBe('2026-08-11T00:00:00.000Z')
+  })
+
+  it('steps backwards, and over a month end', () => {
+    const back = addDaysIn(new Date('2026-09-01T00:00:00Z'), -1, UTC)
+
+    expect(back.toISOString()).toBe('2026-08-31T00:00:00.000Z')
+  })
+
+  it('keeps local midnight across a DST change', () => {
+    // US clocks go back at 2am on 1 Nov 2026, so the long night is the 1st into
+    // the 2nd — midnight on the 1st is still daylight time.
+    const midnight = startOfDayIn(new Date('2026-11-01T12:00:00Z'), NY)
+    const next = addDaysIn(midnight, 1, NY)
+    const clock = toZoneClock(next, NY)
+
+    expect(clock.getHours()).toBe(0)
+    expect(clock.getDate()).toBe(2)
+    // 25 hours, because an hour was given back overnight. Adding 24h would
+    // have landed at 23:00 on the 1st.
+    expect((next.getTime() - midnight.getTime()) / 3_600_000).toBe(25)
+  })
+})
+
+describe('startOfMonthIn', () => {
+  it('returns the 1st at local midnight', () => {
+    const first = startOfMonthIn(new Date('2026-08-12T18:00:00Z'), UTC)
+
+    expect(first.toISOString()).toBe('2026-08-01T00:00:00.000Z')
+  })
+})
+
+describe('addMonthsIn', () => {
+  it('steps a month', () => {
+    const next = addMonthsIn(new Date('2026-08-01T00:00:00Z'), 1, UTC)
+
+    expect(next.toISOString()).toBe('2026-09-01T00:00:00.000Z')
+  })
+
+  it('clamps rather than overflowing a short month', () => {
+    // The bug this exists for: setMonth on the 31st rolls into March, so
+    // stepping forward from 31 January would skip February entirely.
+    const next = addMonthsIn(new Date('2026-01-31T00:00:00Z'), 1, UTC)
+    const clock = toZoneClock(next, UTC)
+
+    expect(clock.getMonth()).toBe(1) // February
+    expect(clock.getDate()).toBe(28)
+  })
+
+  it('clamps into a leap February', () => {
+    const next = addMonthsIn(new Date('2028-01-31T00:00:00Z'), 1, UTC)
+
+    expect(toZoneClock(next, UTC).getDate()).toBe(29)
+  })
+
+  it('crosses a year boundary', () => {
+    const next = addMonthsIn(new Date('2026-12-15T00:00:00Z'), 1, UTC)
+    const clock = toZoneClock(next, UTC)
+
+    expect(clock.getFullYear()).toBe(2027)
+    expect(clock.getMonth()).toBe(0)
+  })
+
+  it('steps backwards too', () => {
+    const back = addMonthsIn(new Date('2026-03-31T00:00:00Z'), -1, UTC)
+
+    expect(toZoneClock(back, UTC).getMonth()).toBe(1) // February, not March
+  })
+})
+
+describe('startOfMonthGridIn', () => {
+  it('backs up to the Monday before the 1st', () => {
+    // 1 Aug 2026 is a Saturday, so the grid opens on Monday 27 July.
+    const start = startOfMonthGridIn(new Date('2026-08-12T12:00:00Z'), UTC)
+
+    expect(start.toISOString()).toBe('2026-07-27T00:00:00.000Z')
+  })
+
+  it('backs up a full six days when the 1st is a Sunday', () => {
+    // The worst case for a Monday-based grid: 1 Nov 2026 is a Sunday, so the
+    // grid has to reach back to Monday 26 October.
+    const start = startOfMonthGridIn(new Date('2026-11-15T12:00:00Z'), UTC)
+
+    expect(start.toISOString()).toBe('2026-10-26T00:00:00.000Z')
+  })
+
+  it('starts on the 1st when that is already a Monday', () => {
+    // 1 Jun 2026 is a Monday.
+    const start = startOfMonthGridIn(new Date('2026-06-15T12:00:00Z'), UTC)
+
+    expect(start.toISOString()).toBe('2026-06-01T00:00:00.000Z')
+  })
+
+  it('covers every day of the month within its six rows', () => {
+    // A 31-day month starting on a Sunday is the longest span a month can
+    // occupy, and it still has to fit.
+    const start = startOfMonthGridIn(new Date('2026-11-15T12:00:00Z'), UTC)
+    const last = addDaysIn(start, MONTH_GRID_DAYS - 1, UTC)
+
+    expect(toZoneClock(last, UTC).getMonth()).toBe(11) // spills into December
+    expect(MONTH_GRID_DAYS).toBe(42)
+  })
+})
+
 describe('addDays', () => {
   it('does not mutate its argument', () => {
     const start = new Date(2026, 7, 10)
@@ -196,5 +330,23 @@ describe('formatWeekRange', () => {
   it('takes the year from the end of the week', () => {
     // Mon 28 Dec 2026 - Sun 3 Jan 2027.
     expect(formatWeekRange(new Date(2026, 11, 28))).toBe('Dec 28 – Jan 3, 2027')
+  })
+})
+
+describe('formatDayLabel', () => {
+  it('names the weekday, so a single column is not ambiguous', () => {
+    expect(formatDayLabel(new Date(2026, 7, 12))).toBe('Wed, Aug 12, 2026')
+  })
+})
+
+describe('formatMonthLabel', () => {
+  it('names the month and year', () => {
+    expect(formatMonthLabel(new Date(2026, 7, 12))).toBe('August 2026')
+  })
+
+  it('is taken from a day inside the month, not the grid start', () => {
+    // The grid for August 2026 opens on 27 July; labelling from that would
+    // title the month wrongly.
+    expect(formatMonthLabel(new Date(2026, 6, 27))).toBe('July 2026')
   })
 })
