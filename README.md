@@ -97,19 +97,41 @@ App at http://localhost:5173. Requests to `/api/*` are proxied to the backend
 Backend settings come from environment variables or `backend/.env`
 (see `backend/.env.example`). Defaults match the docker-compose database.
 
-## Checks
+## Tests and checks
 
 Every push and pull request runs the same two jobs via GitHub Actions
 (`.github/workflows/ci.yml`). To run them locally before pushing:
 
 ```sh
-cd backend && ruff check . && pytest   # lint + tests
-cd frontend && npm run lint && npm run build   # lint + type-check + build
+cd backend  && ruff check . && pytest                        # lint + tests
+cd frontend && npm run lint && npm test && npm run build     # lint + tests + type-check
 ```
 
-The backend suite needs neither Docker nor network access — it runs against an
-in-memory SQLite database and blocks outbound requests, so `docker compose`
-does not have to be up.
+Neither suite needs Docker or network access, so `docker compose` does not have
+to be up for either.
+
+### Backend — pytest
+
+`backend/tests/` runs against an in-memory SQLite database and fails any test
+that attempts a real outbound request, so provider calls must be patched. Note
+that SQLite returns *naive* datetimes where Postgres returns aware ones, which
+is why the engine normalises on entry — expect that trap when adding tests.
+
+### Frontend — Vitest + Testing Library
+
+`npm test` runs once; `npm run test:watch` re-runs on change, and
+`npm run test:coverage` reports coverage.
+
+Tests live beside the code as `*.test.ts` / `*.test.tsx`. They run in jsdom, and
+the suite pins `TZ=America/Los_Angeles` (see `vite.config.ts`) so the grid's
+zone handling is exercised against a browser zone that both differs from UTC and
+observes DST — CI is UTC, which would otherwise hide those cases.
+
+Two things are deliberately out of scope. There are no browser-driven
+end-to-end tests: Google blocks automating its consent screen, so a real
+sign-in cannot be scripted. And **jsdom is pinned to 29** because jsdom 30
+requires Node 22+, while this project targets Node 20; raising the Node floor is
+what would unblock it.
 
 ## Database migrations
 

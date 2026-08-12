@@ -10,6 +10,10 @@ node_modules/
 dist/
 *.local
 
+# Test output
+coverage/
+.vitest-reports/
+
 # Editors / OS
 .DS_Store
 .vscode/*
